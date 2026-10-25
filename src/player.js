@@ -3,14 +3,15 @@
 //   time, controle aéreo que preserva o momento, pulo na parede, agarrar e
 //   escalar bordas, deslizar (C correndo), Gancho do Véu (balançar em
 //   âncoras), correntes de vento, Passo do Véu (estado de avanço),
-//   plataformas móveis que carregam o jogador (e o arremessam quando batem)
-//   e trampolins.
+//   plataformas móveis que carregam o jogador (e o arremessam quando batem),
+//   trampolins e surf em rampas inclinadas (como no surf do CS).
+// O visual (modelo, tecido e animações) fica em character.js.
 // A velocidade do jogador é relativa à plataforma em que ele está de pé; ao
 // sair dela, a velocidade da plataforma é somada (herança de momento).
 import * as THREE from 'three';
 import { PhysicsWorld, SOLID, VEIL, ALL } from './physics.js';
-import { softTexture } from './materials.js';
 import { SKINS } from './skins.js';
+import { Character, ROLL_TIME } from './character.js';
 
 export const RADIUS = 0.35;
 export const HEIGHT = 1.8;
@@ -58,8 +59,15 @@ const SWING_RELEASE_UP = 5.5;
 
 const WIND_MAX_UP = 13;
 const ROLL_IMPACT = 17;
-const ROLL_TIME = 0.42;
-const BODY_PIVOT = 0.5; // centro de rotação do corpo (inclinação, rolamento)
+
+// surf: rampas íngremes sem atrito; segure contra a rampa para não cair
+export const SURF_MAX = 42;
+const SURF_JUMP = 7.5;
+const SURF_ACCEL = 45; // controle forte contra a rampa (como o airaccelerate alto dos servidores de surf)
+const SURF_GRAVITY = 0.55; // fração da gravidade enquanto surfa
+const SURF_LAND_SOAK = 0.7; // quanto do escorregão some ao pousar na rampa
+const SURF_RADIUS = 0.42;
+const FLIP_SPEED = 12.5; // saltar mais rápido que isso dá cambalhota
 
 function damp(a, b, k, dt) {
   return a + (b - a) * (1 - Math.exp(-k * dt));
@@ -69,178 +77,6 @@ function wrapAngle(a) {
   while (a > Math.PI) a -= Math.PI * 2;
   while (a < -Math.PI) a += Math.PI * 2;
   return a;
-}
-
-// Faixa de tecido simulada com Verlet (capa, pontas do cachecol): uma
-// corrente de pontos presa a uma âncora no corpo, desenhada como uma tira.
-class Ribbon {
-  constructor(scene, anchor, mat, { segments, length, width, taper = 0, behind = 0.06, damping = 0.965, flutter = 0.02 }) {
-    this.anchor = anchor;
-    this.n = segments;
-    this.seg = length / segments;
-    this.width = width;
-    this.taper = taper;
-    this.behind = behind;
-    this.damping = damping;
-    this.flutter = flutter;
-    this.pts = Array.from({ length: segments + 1 }, () => new THREE.Vector3());
-    this.prev = Array.from({ length: segments + 1 }, () => new THREE.Vector3());
-    const rows = segments + 1;
-    const pos = new Float32Array(rows * 3 * 3);
-    const uv = new Float32Array(rows * 3 * 2);
-    const idx = [];
-    for (let i = 0; i < rows; i++) {
-      for (let j = 0; j < 3; j++) {
-        uv[(i * 3 + j) * 2] = j / 2;
-        uv[(i * 3 + j) * 2 + 1] = 1 - i / segments;
-      }
-      if (i < segments) {
-        for (let j = 0; j < 2; j++) {
-          const a = i * 3 + j;
-          const b = a + 1;
-          const c = a + 3;
-          const d = c + 1;
-          idx.push(a, c, b, b, c, d);
-        }
-      }
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-    geo.setIndex(idx);
-    this.geo = geo;
-    this.mesh = new THREE.Mesh(geo, mat);
-    this.mesh.frustumCulled = false;
-    this.mesh.castShadow = true;
-    scene.add(this.mesh);
-    this.a = new THREE.Vector3();
-    this.tmp = new THREE.Vector3();
-    this.needsReset = true;
-  }
-
-  reset(fwd) {
-    this.anchor.getWorldPosition(this.a);
-    for (let i = 0; i <= this.n; i++) {
-      this.pts[i].copy(this.a).addScaledVector(fwd, -0.04 * i);
-      this.pts[i].y -= this.seg * i;
-      this.prev[i].copy(this.pts[i]);
-    }
-    this.needsReset = false;
-  }
-
-  // fwd/right: direções do corpo no plano XZ; floorY: chão sob o jogador
-  update(dt, fwd, right, floorY, time, speedK, wind) {
-    if (this.needsReset) this.reset(fwd);
-    this.anchor.getWorldPosition(this.a);
-    const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
-    const h = dt / steps;
-    const g = -14 * h * h;
-    for (let s = 0; s < steps; s++) {
-      this.pts[0].copy(this.a);
-      this.prev[0].copy(this.a);
-      for (let i = 1; i <= this.n; i++) {
-        const p = this.pts[i];
-        const q = this.prev[i];
-        const vx = (p.x - q.x) * this.damping;
-        const vy = (p.y - q.y) * this.damping;
-        const vz = (p.z - q.z) * this.damping;
-        q.copy(p);
-        p.x += vx + (wind ? wind.x * h * h * 0.6 : 0);
-        p.y += vy + g + (wind ? wind.y * h * h * 0.4 : 0);
-        p.z += vz + (wind ? wind.z * h * h * 0.6 : 0);
-      }
-      for (let it = 0; it < 3; it++) {
-        for (let i = 1; i <= this.n; i++) {
-          const a = this.pts[i - 1];
-          const b = this.pts[i];
-          const d = this.tmp.subVectors(b, a);
-          const len = d.length() || 1e-6;
-          d.multiplyScalar(this.seg / len);
-          b.copy(a).add(d);
-        }
-      }
-      for (let i = 1; i <= this.n; i++) {
-        const p = this.pts[i];
-        // mantém o tecido atrás do corpo e acima do chão
-        const rx = p.x - this.a.x;
-        const rz = p.z - this.a.z;
-        const along = rx * fwd.x + rz * fwd.z;
-        const limit = -this.behind - i * 0.012;
-        if (along > limit) {
-          p.x -= fwd.x * (along - limit);
-          p.z -= fwd.z * (along - limit);
-        }
-        if (p.y < floorY + 0.03) p.y = floorY + 0.03;
-      }
-    }
-    const pos = this.geo.attributes.position.array;
-    for (let i = 0; i <= this.n; i++) {
-      const p = this.pts[i];
-      const w = (this.width * (1 - this.taper * (i / this.n))) / 2;
-      const fl = Math.sin(time * 14 + i * 1.3) * this.flutter * speedK * (i / this.n);
-      const o = i * 9;
-      pos[o] = p.x - right.x * w;
-      pos[o + 1] = p.y + fl;
-      pos[o + 2] = p.z - right.z * w;
-      pos[o + 3] = p.x - fwd.x * 0.03 * Math.min(1, i);
-      pos[o + 4] = p.y - fl;
-      pos[o + 5] = p.z - fwd.z * 0.03 * Math.min(1, i);
-      pos[o + 6] = p.x + right.x * w;
-      pos[o + 7] = p.y + fl;
-      pos[o + 8] = p.z + right.z * w;
-    }
-    this.geo.attributes.position.needsUpdate = true;
-    this.geo.computeVertexNormals();
-  }
-}
-
-// Textura da capa: tecido com runas brilhantes na barra (usada como mapa de
-// emissão, então só as runas acendem).
-function capeTextures() {
-  const make = (glow) => {
-    const c = document.createElement('canvas');
-    c.width = 64;
-    c.height = 256;
-    const x = c.getContext('2d');
-    x.fillStyle = glow ? '#000' : '#fff';
-    x.fillRect(0, 0, 64, 256);
-    if (!glow) {
-      for (let i = 0; i < 400; i++) {
-        x.fillStyle = `rgba(0,0,0,${Math.random() * 0.08})`;
-        x.fillRect(Math.random() * 64, Math.random() * 256, 1 + Math.random() * 2, 4 + Math.random() * 10);
-      }
-    }
-    // barra rúnica perto da ponta
-    x.fillStyle = glow ? '#fff' : '#bbb';
-    x.fillRect(0, 222, 64, 3);
-    x.fillRect(0, 248, 64, 3);
-    x.strokeStyle = glow ? '#fff' : '#ccc';
-    x.lineWidth = 2;
-    for (let i = 0; i < 4; i++) {
-      const cx = 8 + i * 16;
-      x.beginPath();
-      x.moveTo(cx, 228);
-      x.lineTo(cx + 5, 236);
-      x.lineTo(cx, 244);
-      x.lineTo(cx - 5, 236);
-      x.closePath();
-      x.stroke();
-    }
-    // runa grande no meio da capa
-    x.beginPath();
-    x.moveTo(32, 90);
-    x.lineTo(42, 120);
-    x.lineTo(32, 150);
-    x.lineTo(22, 120);
-    x.closePath();
-    x.moveTo(32, 104);
-    x.lineTo(32, 136);
-    x.stroke();
-    const t = new THREE.CanvasTexture(c);
-    t.colorSpace = glow ? THREE.NoColorSpace : THREE.SRGBColorSpace;
-    return t;
-  };
-  return { map: make(false), glow: make(true) };
 }
 
 export class Player {
@@ -287,6 +123,9 @@ export class Player {
     this.roll = 0;
     this.celebrate = false;
     this.veilCharge = 1;
+    this.surfing = false;
+    this.surfTimer = 0;
+    this.surfNormal = new THREE.Vector3(0, 1, 0);
 
     this.facing = 0;
     this.stepPhase = 0;
@@ -311,213 +150,32 @@ export class Player {
     this.onRelease = null;
     this.onRoll = null;
 
-    this.buildModel(scene);
+    this.model = new Character(scene);
+    this.root = this.model.root;
     this.setSkin(SKINS[0]);
   }
 
-  // ------------------------------------------------------------------ modelo
-  buildModel(scene) {
-    const cloakMat = new THREE.MeshStandardMaterial({
-      color: 0x262b3a, roughness: 0.88, flatShading: true, side: THREE.DoubleSide,
-      emissive: new THREE.Color(0.2, 0.5, 1.4), emissiveIntensity: 0,
-    });
-    const innerMat = new THREE.MeshStandardMaterial({ color: 0x14161e, roughness: 1, flatShading: true, side: THREE.DoubleSide });
-    const leatherMat = new THREE.MeshStandardMaterial({ color: 0x3a3430, roughness: 0.75, flatShading: true });
-    const trimMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.3, 0.8, 2.4) });
-    const voidMat = new THREE.MeshBasicMaterial({ color: 0x010103 });
-    const eyeMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 2.8, 4.2) });
-    const tex = capeTextures();
-    const capeMat = new THREE.MeshStandardMaterial({
-      color: 0x262b3a, roughness: 0.9, side: THREE.DoubleSide, map: tex.map,
-      emissive: new THREE.Color(0.3, 0.8, 2.4), emissiveMap: tex.glow, emissiveIntensity: 0.6,
-    });
-    const scarfMat = new THREE.MeshStandardMaterial({
-      color: 0x262b3a, roughness: 0.8, side: THREE.DoubleSide,
-      emissive: new THREE.Color(0.3, 0.8, 2.4), emissiveIntensity: 0.25,
-    });
-    this.cloakMat = cloakMat;
-    this.innerMat = innerMat;
-    this.leatherMat = leatherMat;
-    this.trimMat = trimMat;
-    this.eyeMat = eyeMat;
-    this.capeMat = capeMat;
-    this.scarfMat = scarfMat;
-
-    const root = new THREE.Group();
-    const body = new THREE.Group();
-    root.add(body);
-
-    const mesh = (geo, mat, x = 0, y = 0, z = 0, parent = body, shadow = true) => {
-      const m = new THREE.Mesh(geo, mat);
-      m.position.set(x, y, z);
-      m.castShadow = shadow;
-      parent.add(m);
-      return m;
-    };
-
-    // Pernas: coxa (pivô no quadril) e canela (pivô no joelho)
-    const thighGeo = new THREE.CapsuleGeometry(0.078, 0.24, 3, 8);
-    thighGeo.translate(0, -0.18, 0);
-    const shinGeo = new THREE.CapsuleGeometry(0.068, 0.22, 3, 8);
-    shinGeo.translate(0, -0.16, 0);
-    const bootGeo = new THREE.BoxGeometry(0.15, 0.12, 0.27);
-    bootGeo.translate(0, -0.32, 0.045);
-    const wrapGeo = new THREE.CylinderGeometry(0.075, 0.08, 0.1, 8);
-    wrapGeo.translate(0, -0.22, 0);
-    this.legL = new THREE.Group();
-    this.legR = new THREE.Group();
-    this.kneeL = new THREE.Group();
-    this.kneeR = new THREE.Group();
-    this.legL.position.set(-0.11, 0.72, 0);
-    this.legR.position.set(0.11, 0.72, 0);
-    for (const [leg, knee] of [[this.legL, this.kneeL], [this.legR, this.kneeR]]) {
-      mesh(thighGeo, innerMat, 0, 0, 0, leg);
-      knee.position.y = -0.36;
-      leg.add(knee);
-      mesh(shinGeo, innerMat, 0, 0, 0, knee);
-      mesh(wrapGeo, leatherMat, 0, 0, 0, knee);
-      mesh(bootGeo, leatherMat, 0, 0, 0, knee);
-      body.add(leg);
-    }
-
-    // Manto: casaco longo com barra irregular (torno)
-    const prof = [[0.42, 0.36], [0.36, 0.56], [0.29, 0.8], [0.24, 1.02], [0.27, 1.24], [0.25, 1.38], [0.16, 1.48]]
-      .map(([r, y]) => new THREE.Vector2(r, y));
-    const robeGeo = new THREE.LatheGeometry(prof, 14);
-    const rp = robeGeo.attributes.position;
-    for (let i = 0; i < rp.count; i++) {
-      if (rp.getY(i) < 0.4) {
-        const a = Math.atan2(rp.getZ(i), rp.getX(i));
-        rp.setY(i, rp.getY(i) - (Math.sin(a * 5) * 0.5 + 0.5) * 0.1);
-        // a frente do casaco é aberta para as pernas
-        if (Math.sin(a) > 0.6) rp.setY(i, rp.getY(i) + 0.22);
-      }
-    }
-    robeGeo.computeVertexNormals();
-    mesh(robeGeo, cloakMat);
-    // cinto com fivela rúnica
-    const belt = mesh(new THREE.TorusGeometry(0.255, 0.035, 5, 20), leatherMat, 0, 1.02, 0);
-    belt.rotation.x = Math.PI / 2;
-    const buckle = mesh(new THREE.OctahedronGeometry(0.05), trimMat, 0, 1.02, 0.27, body, false);
-    buckle.scale.set(1, 1.3, 0.5);
-    // faixa rúnica descendo pela frente
-    const strip = mesh(new THREE.BoxGeometry(0.035, 0.42, 0.01), trimMat, 0, 0.74, 0.32, body, false);
-    strip.rotation.x = -0.16;
-    // ombros: manto curto + ombreira
-    const mantle = mesh(new THREE.ConeGeometry(0.37, 0.34, 10, 1, true), cloakMat, 0, 1.42, 0);
-    mantle.rotation.y = 0.2;
-    const pauldron = mesh(new THREE.SphereGeometry(0.13, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), leatherMat, -0.27, 1.42, 0);
-    pauldron.scale.set(1.1, 0.8, 1.1);
-    const stud = mesh(new THREE.OctahedronGeometry(0.03), trimMat, -0.3, 1.5, 0.05, body, false);
-    stud.scale.y = 1.5;
-
-    // Capuz pontudo, cara de vazio e olhos que brilham com o Véu
-    // casca do capuz aberta na frente (o vazio do rosto aparece)
-    const HOOD_GAP = 1.7;
-    const hood = mesh(new THREE.SphereGeometry(0.25, 16, 10, Math.PI / 2 + HOOD_GAP / 2, Math.PI * 2 - HOOD_GAP), cloakMat, 0, 1.62, -0.02);
-    hood.scale.set(1, 1.1, 1.1);
-    const tip = mesh(new THREE.ConeGeometry(0.15, 0.42, 8), cloakMat, 0, 1.78, -0.2);
-    tip.rotation.x = -1.15;
-    const face = mesh(new THREE.SphereGeometry(0.19, 12, 9), voidMat, 0, 1.6, 0.03, body, false);
-    face.scale.set(1, 1.12, 0.85);
-    const eyeGeo = new THREE.SphereGeometry(0.026, 8, 6);
-    mesh(eyeGeo, eyeMat, -0.062, 1.62, 0.188, body, false).scale.set(1.5, 0.7, 1);
-    mesh(eyeGeo, eyeMat, 0.062, 1.62, 0.188, body, false).scale.set(1.5, 0.7, 1);
-
-    // Braços: ombro → cotovelo → mão
-    const upperGeo = new THREE.CapsuleGeometry(0.062, 0.2, 3, 8);
-    upperGeo.translate(0, -0.15, 0);
-    const foreGeo = new THREE.CapsuleGeometry(0.056, 0.18, 3, 8);
-    foreGeo.translate(0, -0.13, 0);
-    const bracerGeo = new THREE.CylinderGeometry(0.064, 0.07, 0.14, 8);
-    bracerGeo.translate(0, -0.16, 0);
-    const handGeo = new THREE.SphereGeometry(0.06, 8, 6);
-    handGeo.translate(0, -0.3, 0);
-    this.armL = new THREE.Group();
-    this.armR = new THREE.Group();
-    this.elbowL = new THREE.Group();
-    this.elbowR = new THREE.Group();
-    this.armL.position.set(-0.29, 1.4, 0);
-    this.armR.position.set(0.29, 1.4, 0);
-    for (const [arm, elbow] of [[this.armL, this.elbowL], [this.armR, this.elbowR]]) {
-      mesh(upperGeo, cloakMat, 0, 0, 0, arm);
-      elbow.position.y = -0.3;
-      arm.add(elbow);
-      mesh(foreGeo, innerMat, 0, 0, 0, elbow);
-      mesh(bracerGeo, leatherMat, 0, 0, 0, elbow);
-      mesh(handGeo, leatherMat, 0, 0, 0, elbow);
-      body.add(arm);
-    }
-    // Runa na mão direita (de onde sai o Gancho do Véu)
-    mesh(new THREE.OctahedronGeometry(0.045), trimMat, 0, -0.34, 0.06, this.elbowR, false);
-    this.handR = new THREE.Object3D();
-    this.handR.position.set(0, -0.32, 0.02);
-    this.elbowR.add(this.handR);
-
-    // Âncoras da capa e do cachecol (tecido simulado fica fora do grupo)
-    this.capeAnchor = new THREE.Object3D();
-    this.capeAnchor.position.set(0, 1.44, -0.2);
-    body.add(this.capeAnchor);
-    this.scarfAnchors = [-0.07, 0.07].map((x) => {
-      const o = new THREE.Object3D();
-      o.position.set(x, 1.47, -0.17);
-      body.add(o);
-      return o;
-    });
-
-    this.root = root;
-    this.body = body;
-    for (const n of ['legL', 'legR', 'kneeL', 'kneeR', 'armL', 'armR', 'elbowL', 'elbowR']) this[n].name = n;
-    scene.add(root);
-
-    this.cape = new Ribbon(scene, this.capeAnchor, capeMat, { segments: 9, length: 1.05, width: 0.5, taper: -0.25, behind: 0.08, damping: 0.95, flutter: 0.03 });
-    this.scarves = this.scarfAnchors.map((a, i) => new Ribbon(scene, a, scarfMat, {
-      segments: 6, length: 0.55 + i * 0.12, width: 0.08, taper: 0.4, behind: 0.12, damping: 0.97, flutter: 0.05,
-    }));
-    this.cloth = [this.cape, ...this.scarves];
-
-    // Corda do Gancho do Véu
-    const ropeGeo = new THREE.BufferGeometry();
-    ropeGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
-    this.ropeMat = new THREE.LineBasicMaterial({ color: new THREE.Color(0.6, 1.6, 3.2), transparent: true, opacity: 0.9 });
-    this.rope = new THREE.Line(ropeGeo, this.ropeMat);
-    this.rope.frustumCulled = false;
-    this.rope.visible = false;
-    scene.add(this.rope);
-
-    // Sombra circular sob o jogador (ajuda a calcular saltos).
-    const blobMat = new THREE.MeshBasicMaterial({
-      map: softTexture('rgba(0,0,0,0.85)', 'rgba(0,0,0,0)'), transparent: true, depthWrite: false,
-      polygonOffset: true, polygonOffsetFactor: -2,
-    });
-    this.blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), blobMat);
-    this.blob.rotation.x = -Math.PI / 2;
-    this.blob.renderOrder = 2;
-    scene.add(this.blob);
-    this.blobMat = blobMat;
-  }
-
+  // ------------------------------------------------------------------ visual
   setSkin(skin) {
     this.skin = skin;
-    this.cloakMat.color.set(skin.cloak);
-    this.capeMat.color.set(skin.cloak);
-    this.scarfMat.color.set(skin.cloak);
-    this.innerMat.color.set(skin.inner);
-    this.leatherMat.color.set(skin.leather);
-    this.trimMat.color.setRGB(...skin.trim);
-    this.capeMat.emissive.setRGB(...skin.trim).multiplyScalar(0.5);
-    this.scarfMat.emissive.setRGB(...skin.trim).multiplyScalar(0.5);
-    this.cloakMat.emissive.setRGB(...skin.trim).multiplyScalar(0.5);
-    this.ropeMat.color.setRGB(...skin.trim).multiplyScalar(1.3);
-    this.eyeBase = new THREE.Color(...skin.eye);
-    this.eyeMat.color.copy(this.eyeBase);
+    this.model.setSkin(skin);
   }
 
   // Mostra/esconde o andarilho inteiro (primeira pessoa, menus).
   setVisible(v) {
-    this.root.visible = v;
-    for (const r of this.cloth) r.mesh.visible = v;
-    if (!v) this.rope.visible = false;
+    this.model.setVisible(v);
+  }
+
+  get cloakMat() {
+    return this.model.cloakMat;
+  }
+
+  get trimMat() {
+    return this.model.trimMat;
+  }
+
+  get eyeMat() {
+    return this.model.eyeMat;
   }
 
   // ------------------------------------------------------------------ estado
@@ -546,9 +204,10 @@ export class Player {
     this.swing.anchor = null;
     this.facing = yaw + Math.PI; // de costas para a câmera
     this.fallStartY = pos.y;
+    this.surfing = false;
+    this.surfTimer = 0;
     this.cloakMat.emissiveIntensity = 0;
-    for (const r of this.cloth) r.needsReset = true;
-    this.body.rotation.x = 0;
+    this.model.reset();
     this.animate(0.016);
   }
 
@@ -621,6 +280,8 @@ export class Player {
   //          slidePressed, grapplePressed, grappleHeld }
   update(dt, ctrl) {
     this.time += dt;
+    this.surfTimer -= dt;
+    this.surfing = this.surfTimer > 0 && !this.grounded && this.state === 'normal';
     this.prevGrounded = this.grounded;
     this.grabCooldown -= dt;
     this.coyote -= dt;
@@ -748,14 +409,16 @@ export class Player {
           az += into * this.wallNz;
         }
       }
-      this.vel.x += ax * AIR_ACCEL * dt;
-      this.vel.z += az * AIR_ACCEL * dt;
-      if (moveLen < 0.05) {
+      const acc = this.surfing ? SURF_ACCEL : AIR_ACCEL;
+      this.vel.x += ax * acc * dt;
+      this.vel.z += az * acc * dt;
+      if (moveLen < 0.05 && !this.surfing) {
         const k = Math.max(0, 1 - AIR_IDLE_DRAG * dt);
         this.vel.x *= k;
         this.vel.z *= k;
       }
-      const cap = Math.min(MAX_AIR_SPEED, Math.max(speed, this.airSpeedCap));
+      if (this.surfing) this.airSpeedCap = Math.min(SURF_MAX, Math.max(this.airSpeedCap, this.horizontalSpeed));
+      const cap = Math.min(this.surfing ? SURF_MAX : MAX_AIR_SPEED, Math.max(speed, this.airSpeedCap));
       const hs = Math.hypot(this.vel.x, this.vel.z);
       if (hs > cap) {
         this.vel.x *= cap / hs;
@@ -769,6 +432,18 @@ export class Player {
       this.doJump(speed);
     } else if (this.jumpBuffer > 0 && !this.grounded && this.wallTimer > 0 && this.canWallJump()) {
       this.wallJump();
+    } else if (this.jumpBuffer > 0 && this.surfing) {
+      // salto para fora da rampa
+      const n = this.surfNormal;
+      this.vel.x += n.x * SURF_JUMP;
+      this.vel.y = Math.max(this.vel.y, 0) + 4 + n.y * SURF_JUMP * 0.5;
+      this.vel.z += n.z * SURF_JUMP;
+      this.jumpBuffer = 0;
+      this.surfing = false;
+      this.surfTimer = 0;
+      this.airSpeedCap = Math.min(SURF_MAX, this.horizontalSpeed);
+      this.jumping = false;
+      this.onJump?.();
     }
     // Salto variável: soltar o botão corta a subida.
     if (this.jumping && !ctrl.jumpHeld && this.vel.y > 0 && !this.jumpCut) {
@@ -779,7 +454,7 @@ export class Player {
 
     // Gravidade em duas metades (antes e depois do movimento): a altura do
     // salto fica igual em 30, 60 ou 144 fps.
-    const g = this.vel.y < 0 ? GRAVITY * FALL_MULT : GRAVITY;
+    const g = this.surfing ? GRAVITY * SURF_GRAVITY : this.vel.y < 0 ? GRAVITY * FALL_MULT : GRAVITY;
     this.vel.y = Math.max(this.vel.y - g * dt * 0.5, -MAX_FALL);
 
     const before = this.grounded ? this.groundCol : null;
@@ -834,6 +509,7 @@ export class Player {
     this.jumpCut = false;
     this.airSpeedCap = Math.min(MAX_AIR_SPEED, Math.max(this.horizontalSpeed, speed));
     this.fallStartY = this.pos.y;
+    if (this.horizontalSpeed > FLIP_SPEED) this.model.startFlip('front');
     this.onJump?.();
   }
 
@@ -876,6 +552,7 @@ export class Player {
     this.airSpeedCap = Math.min(MAX_AIR_SPEED, Math.max(this.airSpeedCap, this.horizontalSpeed, WALK));
     this.facing = Math.atan2(this.vel.x, this.vel.z);
     this.fallStartY = this.pos.y;
+    this.model.startFlip(Math.random() < 0.5 ? 'twistL' : 'twistR');
     this.onWallJump?.();
   }
 
@@ -1113,6 +790,7 @@ export class Player {
       const before = this.pos.y;
       this.pos.y += this.vel.y * h;
       this.resolveVertical(mask, before);
+      if (this.world.ramps.length) this.resolveRamps();
     }
 
     // Mantém contato ao descer degraus pequenos.
@@ -1151,6 +829,47 @@ export class Player {
         any = true;
       }
       if (!any) break;
+    }
+  }
+
+  // Rampas de surf: empurra para fora da face e tira a velocidade que entra
+  // nela. Sem atrito: a gravidade escorrega o jogador pela face.
+  resolveRamps() {
+    const r = SURF_RADIUS;
+    const cy = this.pos.y + r;
+    for (const ramp of this.world.ramps) {
+      if (!ramp.enabled) continue;
+      const hit = ramp.contact(this.pos.x, cy, this.pos.z, r);
+      if (!hit) continue;
+      this.pos.x += hit.nx * hit.depth;
+      this.pos.y += hit.ny * hit.depth;
+      this.pos.z += hit.nz * hit.depth;
+      const vn = this.vel.x * hit.nx + this.vel.y * hit.ny + this.vel.z * hit.nz;
+      if (vn < 0) {
+        this.vel.x -= hit.nx * vn;
+        this.vel.y -= hit.ny * vn;
+        this.vel.z -= hit.nz * vn;
+      }
+      if (this.surfTimer <= 0) {
+        // pouso macio: absorve boa parte do escorregão face abaixo
+        const gx = hit.nx * hit.ny;
+        const gy = hit.ny * hit.ny - 1;
+        const gz = hit.nz * hit.ny;
+        const gl = Math.hypot(gx, gy, gz) || 1;
+        const vd = (this.vel.x * gx + this.vel.y * gy + this.vel.z * gz) / gl;
+        if (vd > 0) {
+          const k = (vd * SURF_LAND_SOAK) / gl;
+          this.vel.x -= gx * k;
+          this.vel.y -= gy * k;
+          this.vel.z -= gz * k;
+        }
+        this.onSurf?.();
+      }
+      this.surfTimer = 0.14;
+      this.surfNormal.set(hit.nx, hit.ny, hit.nz);
+      this.airDashUsed = false;
+      this.jumping = false;
+      this.fallStartY = this.pos.y;
     }
   }
 
@@ -1309,205 +1028,15 @@ export class Player {
   // ----------------------------------------------------------- animação
   animate(dt) {
     const hs = this.horizontalSpeed;
-    const k = 16;
     let targetFacing = this.facing;
     if (this.state === 'normal' && hs > 0.4) targetFacing = Math.atan2(this.vel.x, this.vel.z);
+    if (this.state === 'swing' && hs > 0.5) targetFacing = Math.atan2(this.vel.x, this.vel.z);
     if (this.state === 'slide') targetFacing = Math.atan2(this.slide.dir.x, this.slide.dir.z);
     if (this.state === 'dash') targetFacing = Math.atan2(this.dashDir.x, this.dashDir.z);
     if (this.state === 'hang' || this.state === 'climb') targetFacing = Math.atan2(-this.hang.nx, -this.hang.nz);
     if (this.wallSliding) targetFacing = Math.atan2(-this.wallNx, -this.wallNz);
     this.facing += wrapAngle(targetFacing - this.facing) * (1 - Math.exp(-14 * dt));
-
-    this.root.position.copy(this.pos);
-    this.root.rotation.y = this.facing;
-
-    const runAmt = Math.min(hs / RUN, 1);
-    const sw = Math.sin(this.stepPhase);
-    let legL = 0, legR = 0, armL = 0, armR = 0, armSpread = 0;
-    let kneeL = 0.08, kneeR = 0.08, elbowL = -0.25, elbowR = -0.25;
-    let lean = 0, bodyY = 0, crouch = 0;
-
-    if (this.celebrate) {
-      armL = armR = -2.7;
-      armSpread = 0.5;
-      elbowL = elbowR = -0.2;
-      bodyY = Math.abs(Math.sin(this.time * 3)) * 0.05;
-      lean = -0.1;
-    } else if (this.state === 'hang') {
-      armL = armR = -2.85;
-      armSpread = 0.25;
-      elbowL = elbowR = 0;
-      legL = Math.sin(this.time * 2) * 0.12;
-      legR = -legL;
-      kneeL = kneeR = 0.3;
-      lean = -0.08;
-    } else if (this.state === 'climb') {
-      const t = this.climb.t;
-      armL = armR = t < 0.6 ? -2.6 + t * 2.2 : -0.6;
-      elbowL = elbowR = -0.6;
-      legL = -1.0 * Math.sin(t * Math.PI);
-      kneeL = 1.2 * Math.sin(t * Math.PI);
-      legR = 0.3;
-      lean = 0.35;
-    } else if (this.state === 'dash') {
-      armL = armR = 1.1;
-      armSpread = 0.35;
-      elbowL = elbowR = 0;
-      legL = 0.6;
-      legR = -0.3;
-      kneeL = 0.9;
-      kneeR = 0.6;
-      lean = 0.65;
-    } else if (this.state === 'slide') {
-      lean = -1.15;
-      legL = 0.35;
-      kneeL = 0.1;
-      legR = 0.9;
-      kneeR = 1.5;
-      armL = 0.6;
-      armR = -1.4;
-      armSpread = 0.6;
-      elbowR = -0.4;
-    } else if (this.state === 'swing') {
-      const sv = this.vel.y;
-      armR = -3.0;
-      armL = -2.4;
-      armSpread = 0.15;
-      elbowL = elbowR = -0.05;
-      legL = THREE.MathUtils.clamp(-sv * 0.05, -0.8, 0.6) - 0.3;
-      legR = legL + 0.5;
-      kneeL = 0.5;
-      kneeR = 0.9;
-      lean = THREE.MathUtils.clamp(hs * 0.025, 0, 0.4);
-    } else if (this.wallSliding) {
-      armL = armR = -1.7;
-      armSpread = 0.5;
-      legL = -0.5;
-      kneeL = 0.8;
-      legR = 0.2;
-      lean = -0.2;
-    } else if (!this.grounded) {
-      const rising = this.vel.y > 0;
-      legL = rising ? -0.9 : -0.4;
-      kneeL = rising ? 1.3 : 0.5;
-      legR = rising ? 0.5 : 0.25;
-      kneeR = rising ? 0.9 : 0.4;
-      armL = -0.6;
-      armR = rising ? -1.2 : -0.4;
-      armSpread = 0.45;
-      elbowL = elbowR = -0.4;
-      lean = Math.min(this.horizontalSpeed / RUN, 1.6) * 0.2;
-    } else {
-      const amp = this.sneaking ? 0.55 : 0.95;
-      legL = sw * amp * runAmt * 1.15;
-      legR = -legL;
-      kneeL = 0.1 + Math.max(0, Math.sin(this.stepPhase + 1.6)) * 1.4 * runAmt;
-      kneeR = 0.1 + Math.max(0, Math.sin(this.stepPhase + 1.6 + Math.PI)) * 1.4 * runAmt;
-      armL = -sw * 0.75 * runAmt;
-      armR = -armL;
-      elbowL = elbowR = -0.25 - runAmt * 1.0;
-      bodyY = Math.abs(Math.cos(this.stepPhase)) * 0.07 * runAmt;
-      lean = runAmt * 0.28;
-      if (this.sneaking) {
-        crouch = this.low ? 1.9 : 1;
-        lean += this.low ? 0.55 : 0.35;
-        kneeL += 0.5;
-        kneeR += 0.5;
-        armL = armL * 0.5 + 0.35;
-        armR = armR * 0.5 + 0.35;
-      }
-      if (hs < 0.3) {
-        // respiração parada
-        bodyY = Math.sin(this.time * 2.2) * 0.012;
-        armL = armR = 0.05;
-        elbowL = elbowR = -0.15;
-      }
-    }
-
-    this.legL.rotation.x = damp(this.legL.rotation.x, legL, k, dt);
-    this.legR.rotation.x = damp(this.legR.rotation.x, legR, k, dt);
-    this.kneeL.rotation.x = damp(this.kneeL.rotation.x, kneeL, k, dt);
-    this.kneeR.rotation.x = damp(this.kneeR.rotation.x, kneeR, k, dt);
-    this.armL.rotation.x = damp(this.armL.rotation.x, armL, k, dt);
-    this.armR.rotation.x = damp(this.armR.rotation.x, armR, k, dt);
-    this.elbowL.rotation.x = damp(this.elbowL.rotation.x, elbowL, k, dt);
-    this.elbowR.rotation.x = damp(this.elbowR.rotation.x, elbowR, k, dt);
-    this.armL.rotation.z = damp(this.armL.rotation.z, -armSpread, k, dt);
-    this.armR.rotation.z = damp(this.armR.rotation.z, armSpread, k, dt);
-
-    // rolamento: uma cambalhota completa sobre o centro do corpo
-    let rot;
-    if (this.roll > 0) {
-      this.roll -= dt;
-      const t = 1 - Math.max(0, this.roll) / ROLL_TIME;
-      rot = lean + t * Math.PI * 2;
-      crouch = 1;
-      if (this.roll <= 0) rot = lean;
-      this.body.rotation.x = rot;
-    } else {
-      this.body.rotation.x = damp(this.body.rotation.x, lean, this.state === 'slide' ? 18 : 10, dt);
-      rot = this.body.rotation.x;
-    }
-
-    this.crouch = damp(this.crouch ?? 0, crouch, 12, dt);
-    this.landSquash = damp(this.landSquash, 0, 7, dt);
-    const sq = this.landSquash;
-    const sy = 1 - 0.24 * sq - 0.18 * this.crouch;
-    const sxz = 1 + 0.14 * sq;
-    this.body.scale.set(sxz, sy, sxz);
-    // gira em torno do centro (e não dos pés)
-    const py = BODY_PIVOT * sy;
-    this.body.position.set(0, bodyY + py - py * Math.cos(rot), -py * Math.sin(rot));
-    if (this.state === 'slide') this.body.position.y -= 0.05;
-
-    // brilho durante o avanço e olhos que acompanham a carga do Véu
-    const glow = this.state === 'dash' ? 1.4 : this.state === 'swing' ? 0.25 : 0;
-    this.cloakMat.emissiveIntensity = damp(this.cloakMat.emissiveIntensity, glow, 20, dt);
-    const charge = THREE.MathUtils.clamp(this.veilCharge, 0, 1);
-    const eyeK = 0.25 + 0.75 * charge * charge;
-    this.eyeMat.color.copy(this.eyeBase).multiplyScalar(eyeK);
-    this.capeMat.emissiveIntensity = 0.3 + charge * 0.6 + this.cloakMat.emissiveIntensity;
-    this.scarfMat.emissiveIntensity = 0.12 + charge * 0.25 + this.cloakMat.emissiveIntensity * 0.5;
-
-    // sombra circular
-    const ground = this.world.groundBelow(this.pos.x, this.pos.z, 0.05, this.pos.y + 0.05, 40);
-    if (ground !== null) {
-      const hgt = this.pos.y - ground;
-      this.blob.visible = true;
-      this.blob.position.set(this.pos.x, ground + 0.03, this.pos.z);
-      const s = 0.9 + Math.min(hgt, 8) * 0.06;
-      this.blob.scale.set(s, s, s);
-      this.blobMat.opacity = Math.max(0.15, 0.75 - hgt * 0.06);
-    } else {
-      this.blob.visible = false;
-    }
-
-    // tecido (capa e cachecol)
-    this.root.updateMatrixWorld(true);
-    this.fwd.set(Math.sin(this.facing), 0, Math.cos(this.facing));
-    this.rightV.set(Math.cos(this.facing), 0, -Math.sin(this.facing));
-    const floorY = ground !== null ? ground : this.pos.y - 50;
-    const speedK = Math.min(1, (this.state === 'dash' ? 30 : Math.hypot(hs, this.vel.y)) / 14);
-    if (dt > 0) {
-      for (const r of this.cloth) {
-        r.mesh.visible = this.root.visible;
-        r.update(Math.min(dt, 0.05), this.fwd, this.rightV, floorY, this.time, speedK, this.wind);
-      }
-    }
-
-    // corda do gancho
-    const a = this.state === 'swing' ? this.swing.anchor : null;
-    this.rope.visible = !!a && this.root.visible;
-    if (a) {
-      this.handR.getWorldPosition(this.tmpV);
-      const arr = this.rope.geometry.attributes.position.array;
-      arr[0] = this.tmpV.x;
-      arr[1] = this.tmpV.y;
-      arr[2] = this.tmpV.z;
-      arr[3] = a.pos.x;
-      arr[4] = a.pos.y;
-      arr[5] = a.pos.z;
-      this.rope.geometry.attributes.position.needsUpdate = true;
-    }
+    this.model.update(dt, this, this.world);
   }
+
 }

@@ -30,7 +30,7 @@ const DEATH_COLOR = new THREE.Color(2.2, 0.3, 0.8);
 const RING_COLOR = new THREE.Color(2, 1.5, 0.4);
 const FRAG_COLOR = new THREE.Color(2.2, 1.7, 0.8);
 const VIOLET = new THREE.Color(1.4, 0.5, 2.6);
-const MUSIC_BY_CHAPTER = ['run', 'run', 'run', 'veu', 'final'];
+const MUSIC_BY_CHAPTER = ['run', 'run', 'run', 'veu', 'final', 'veu'];
 const MENU_STATES = new Set(['title', 'select', 'options', 'wardrobe', 'memories', 'epilogue']);
 
 function freshProgress() {
@@ -123,6 +123,7 @@ export class Game {
       else if (scr === 'options') this.openOptions('select');
       if (q.get('run')) this.input.down.add('KeyW');
       if (q.get('skin')) this.player.setSkin(skinById(q.get('skin')));
+      if (q.get('anim')) this.demo = q.get('anim');
       if (q.get('pos')) this.respawn(new THREE.Vector3(...q.get('pos').split(',').map(Number)), 0);
       if (q.get('dim')) this.tryShift();
     }
@@ -139,6 +140,8 @@ export class Game {
   // ------------------------------------------------------------- opções
   applySettings() {
     const st = this.settings;
+    this.input.setBindings(st.keys ?? {});
+    this.ui.setKeyLabels?.(this.input);
     this.cam.sensitivity = st.sensitivity;
     this.cam.padSensitivity = st.padSensitivity;
     this.cam.invertY = st.invertY;
@@ -289,6 +292,7 @@ export class Game {
       }
     };
     this.level.onCrumble = () => this.audio.crumble();
+    this.level.onBossEvent = (type, a, b) => this.bossEvent(type, a, b);
     this.guardians = this.level.guardianDefs.map((d) => new Guardian(this.scene, this.world, d));
     for (const g of this.guardians) {
       g.onStateChange = (_g, st, prev) => {
@@ -300,6 +304,7 @@ export class Game {
     }
     this.ghost.load(loadGhost(def.id));
     this.ui.setStealth(def.type === 'stealth');
+    this.ui.setBoss(def.boss ? 0 : null, this.level.boss?.runes.length ?? 0);
     this.ui.setFragment(!!this.level.fragment, this.progress.fragments[def.id]);
     this.stats.deaths = 0;
     this.restartLevel();
@@ -316,7 +321,7 @@ export class Game {
 
   restartLevel() {
     this.level.reset();
-    this.checkpoint = this.level.checkpoints[0] ?? null;
+    this.checkpoint = this.stealth ? this.level.checkpoints[0] ?? null : null;
     if (this.checkpoint) this.level.activateCheckpoint(this.checkpoint);
     const deaths = this.stats.deaths;
     this.stats = { time: 0, deaths, veils: 0, topSpeed: 0, grapples: 0 };
@@ -340,7 +345,27 @@ export class Game {
     if (this.state === 'dead' || this.state === 'captured' || this.state === 'finish') this.setState('playing');
   }
 
+  // Morreu numa corrida com ponto de controle: volta nele, o tempo segue.
+  respawnAtCheckpoint() {
+    const cp = this.checkpoint;
+    const lv = this.level;
+    lv.resetCrumbles();
+    if (lv.hasDimensions) {
+      const d = cp.dim ?? 0;
+      lv.setDimension(d);
+      this.applyEnv(d === 1 ? 'veu' : this.levelDef.env);
+      this.ui.setDimension(d);
+    }
+    this.respawn(cp.pos, cp.yaw);
+    if (lv.shadowDelay) this.shadow.start(lv.shadowDelay);
+    this.effects.clear();
+    this.ui.setDanger(0);
+    this.ui.toast('Ponto de controle', 1);
+    this.setState('playing');
+  }
+
   respawn(pos, yaw) {
+    this.player.demoWind = null;
     this.player.respawn(pos, yaw);
     this.player.setVisible(!this.cam.firstPerson);
     this.cam.snap(this.player.pos, yaw);
@@ -363,6 +388,7 @@ export class Game {
   // ------------------------------------------------------------- telas
   menuReady() {
     this.audio.init();
+    this.player.demoWind = null;
     this.input.unlock();
     this.speedrun = null;
     this.ui.setTotal(null);
@@ -402,8 +428,53 @@ export class Game {
       build();
     });
     build();
+    this.ui.buildPoses((pose) => {
+      this.demo = pose;
+      this.audio.menu();
+    });
     this.ui.showScreen('wardrobe');
     this.player.setVisible(true);
+  }
+
+  // Prévia de animações no guarda-roupa (o andarilho "corre" parado).
+  demoPose(dt) {
+    const p = this.player;
+    const POSES = ['parado', 'marcha', 'corrida', 'salto', 'surf', 'deslize', 'gancho', 'esgueirar'];
+    let pose = this.demo ?? 'auto';
+    if (pose === 'auto') pose = POSES[Math.floor(this.stateTime / 3.2) % POSES.length];
+    this.ui.setDemoPose?.(pose, this.demo ?? 'auto');
+    const f = p.facing;
+    const fx = Math.sin(f);
+    const fz = Math.cos(f);
+    const speed = { parado: 0, marcha: 4, corrida: 9.5, salto: 9, surf: 22, deslize: 13, gancho: 12, esgueirar: 2.3 }[pose];
+    p.vel.set(fx * speed, 0, fz * speed);
+    p.state = 'normal';
+    p.grounded = true;
+    p.surfing = false;
+    p.sneaking = pose === 'esgueirar';
+    p.height = pose === 'esgueirar' ? 0.95 : 1.8;
+    p.swing.anchor = null;
+    if (speed > 0) p.stepPhase += dt * (5 + speed * 1.05);
+    if (pose === 'salto') {
+      p.grounded = false;
+      p.vel.y = Math.sin(this.time * 2) * 6;
+    } else if (pose === 'surf') {
+      p.grounded = false;
+      p.surfing = true;
+      p.surfNormal.set(-Math.cos(f) * 0.8, 0.55, Math.sin(f) * 0.8);
+    } else if (pose === 'deslize') {
+      p.state = 'slide';
+      p.slide.dir.set(fx, 0, fz);
+    } else if (pose === 'gancho') {
+      p.state = 'swing';
+      p.grounded = false;
+      this.demoAnchor ??= { pos: new THREE.Vector3() };
+      this.demoAnchor.pos.set(p.pos.x + fx * 2, p.pos.y + 7, p.pos.z + fz * 2);
+      p.swing.anchor = this.demoAnchor;
+    }
+    // o vento do "movimento" faz a capa voar como se estivesse correndo
+    this.demoWind ??= new THREE.Vector3();
+    p.demoWind = this.demoWind.set(-fx * speed * 6.4, 0, -fz * speed * 6.4);
   }
 
   openMemories() {
@@ -432,7 +503,7 @@ export class Game {
       this.progress = freshProgress();
       this.player.setSkin(skinById('andarilho'));
       this.ghost.clear();
-    });
+    }, this.input);
     this.ui.showScreen('options');
   }
 
@@ -557,6 +628,39 @@ export class Game {
     this.effects.ring(p.pos.x, p.pos.y, p.pos.z, 7, 0.6, target === 1 ? VIOLET : undefined);
     this.effects.sparks(p.pos.x, p.pos.y + 1, p.pos.z, 20, { speed: 3, life: 0.5, color: target === 1 ? VIOLET : undefined });
     this.stats.shifts = (this.stats.shifts ?? 0) + 1;
+  }
+
+  bossEvent(type, a, b) {
+    if (this.state !== 'playing') return;
+    const p = this.player.pos;
+    if (type === 'warn') {
+      this.audio.alert('suspicious');
+    } else if (type === 'slam') {
+      const d = Math.hypot(a.x - p.x, a.z - p.z);
+      this.audio.crash();
+      this.audio.land(1);
+      this.cam.addShake(Math.max(0.15, 0.8 - d / 25));
+      this.effects.dust(a.x, a.y, a.z, 40, 2.2);
+      this.effects.ring(a.x, a.y, a.z, 6, 0.7, DEATH_COLOR, false);
+    } else if (type === 'sweepLow' || type === 'sweepHigh') {
+      this.audio.alert('chase');
+      this.ui.toast(type === 'sweepLow' ? 'Braço baixo — pule!' : 'Braço alto — deslize!', 1.3);
+    } else if (type === 'hit') {
+      this.audio.rune();
+      this.audio.capture();
+      this.cam.addShake(0.7);
+      this.ui.flash(0.6);
+      this.ui.setBoss(a, b);
+      this.ui.toast(a < b ? `O Colosso cambaleia — ${a}/${b}` : 'O Colosso cai!', 2);
+      this.slowmo = 0.5;
+    } else if (type === 'defeat') {
+      this.audio.artifact();
+      this.ui.flash(1.6);
+      this.cam.addShake(1);
+      this.ui.showHint('O rasgo está aberto. Entre no portal e <b>costure o Véu</b>.', 8);
+      const g = this.level.goal?.pos;
+      if (g) this.effects.sparks(g.x, g.y + 2, g.z, 200, { speed: 8, life: 1.6, gravity: 1, size: 0.15, whiteChance: 0.5 });
+    }
   }
 
   collectFragment(ev) {
@@ -791,8 +895,8 @@ export class Game {
 
   buildControls() {
     const i = this.input;
-    const fz = (i.isDown('KeyW') || i.isDown('ArrowUp') ? 1 : 0) - (i.isDown('KeyS') || i.isDown('ArrowDown') ? 1 : 0) - i.padMove.y;
-    const fx = (i.isDown('KeyD') || i.isDown('ArrowRight') ? 1 : 0) - (i.isDown('KeyA') || i.isDown('ArrowLeft') ? 1 : 0) + i.padMove.x;
+    const fz = (i.action('up') ? 1 : 0) - (i.action('down') ? 1 : 0) - i.padMove.y;
+    const fx = (i.action('right') ? 1 : 0) - (i.action('left') ? 1 : 0) + i.padMove.x;
     this.cam.forward(this.fwd);
     this.cam.right(this.right);
     this.move.set(0, 0, 0).addScaledVector(this.fwd, fz).addScaledVector(this.right, fx);
@@ -848,7 +952,7 @@ export class Game {
     const target = p.state === 'swing' ? p.swing.anchor : p.findAnchor();
     for (const a of this.level.anchors) a.hot += ((a === target ? 1 : 0) - a.hot) * Math.min(1, dt * 12);
     const canGrab = target && p.state !== 'swing' && p.state !== 'hang' && p.state !== 'climb';
-    this.ui.setPrompt(canGrab ? '<kbd>E</kbd> gancho' : null);
+    this.ui.setPrompt(canGrab ? `<kbd>${this.input.label('grapple')}</kbd> gancho` : null);
 
     for (const ev of this.level.triggers(p, this.veil)) {
       if (ev.type === 'ring') {
@@ -885,6 +989,7 @@ export class Game {
       if (Math.hypot(p.pos.x - cp.pos.x, p.pos.z - cp.pos.z) < 3 && Math.abs(p.pos.y - cp.pos.y) < 2) {
         this.level.activateCheckpoint(cp);
         if (!this.checkpoint || cp.index > this.checkpoint.index) this.checkpoint = cp;
+        cp.dim = this.level.dim;
         this.audio.checkpoint();
         this.ui.toast('Ponto de controle');
       }
@@ -949,7 +1054,11 @@ export class Game {
     this.cam.update(dt, this.player);
     this.ui.drawSpeedLines(0, dt);
     this.audio.setSpeed(0);
-    if (this.stateTime >= DEATH_PAUSE || this.input.actionPressed('restart')) this.restartLevel();
+    if (this.input.actionPressed('restart')) this.restartLevel();
+    else if (this.stateTime >= DEATH_PAUSE) {
+      if (this.checkpoint) this.respawnAtCheckpoint();
+      else this.restartLevel();
+    }
   }
 
   updateRespawn(dt) {
@@ -1002,21 +1111,24 @@ export class Game {
     if (this.state === 'wardrobe') {
       // close no andarilho, deslocado para a direita da tela
       const pp = this.player.pos;
-      const a = this.player.facing + 0.5 + Math.sin(t * 0.25) * 0.6;
+      const a = this.player.facing + 0.6 + this.stateTime * 0.3; // volta completa: mostra a capa
       this.tmp.set(pp.x + Math.sin(a) * 3.4, pp.y + 1.5, pp.z + Math.cos(a) * 3.4);
       // olha um pouco à esquerda do andarilho: ele fica à direita do painel
       const vx = -Math.sin(a);
       const vz = -Math.cos(a);
       this.tmp2.set(pp.x + vz * 1.1, pp.y + 1.05, pp.z - vx * 1.1);
       this.cam.cinematic(this.tmp, this.tmp2, dt, 3);
-      this.player.vel.set(0, 0, 0);
+      this.demoPose(dt);
     } else {
       this.tmp.set(s.x + Math.sin(t * 0.08) * 10, s.y + 7 + Math.sin(t * 0.13) * 1.2, s.z + 12 + Math.cos(t * 0.08) * 3);
       this.tmp2.set(s.x, s.y + 1.5, s.z - 25);
       this.cam.cinematic(this.tmp, this.tmp2, dt, 1.5);
     }
     for (const g of this.guardians) g.updateVisuals(dt);
-    this.player.grounded = true; // pose parada nos menus
+    if (this.state !== 'wardrobe') {
+      this.player.grounded = true; // pose parada nos menus
+      this.player.vel.set(0, 0, 0);
+    }
     this.player.animate(dt);
     this.handleMenuInput(realDt);
   }

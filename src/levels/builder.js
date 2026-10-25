@@ -1232,6 +1232,11 @@ export class LevelBuilder {
       o.mesh.material = on ? this.dimMats.active[o.d] : this.dimMats.ghost[o.d];
       o.mesh.castShadow = on;
     }
+    for (const r of this.dimRamps ?? []) {
+      const on = r.d === d;
+      r.ramp.enabled = on;
+      r.mesh.material = on ? r.active : r.ghost;
+    }
     if (this.dimMats) {
       this.dimMats.edge[d].opacity = 0.35;
       this.dimMats.edge[1 - d].opacity = 0.9;
@@ -1239,7 +1244,7 @@ export class LevelBuilder {
   }
 
   get hasDimensions() {
-    return this.dimObjs.length > 0;
+    return this.dimObjs.length > 0 || (this.dimRamps?.length ?? 0) > 0;
   }
 
   // O jogador ficaria preso dentro de um bloco do outro mundo?
@@ -1311,6 +1316,329 @@ export class LevelBuilder {
     this.group.add(mesh);
     this.fragment = { pos: new THREE.Vector3(x, y, z), mesh, halo, mat, light, active: true };
     return this.fragment;
+  }
+
+  // Rampa de surf (prisma triangular ao longo de z). Caia numa das faces e
+  // segure a direção contra ela: sem atrito, a gravidade dá a velocidade.
+  surfRamp(x0, z0, z1, h0, h1, w = 6.5, H = 9.5, tint = [0.3, 1.1, 2.2]) {
+    this.world.addRamp({ x0, z0, z1, h0, h1, w, H });
+    if (!this.surfTex) {
+      const c = document.createElement('canvas');
+      c.width = c.height = 128;
+      const x = c.getContext('2d');
+      x.fillStyle = '#000';
+      x.fillRect(0, 0, 128, 128);
+      x.strokeStyle = '#fff';
+      x.lineWidth = 3;
+      x.strokeRect(1.5, 1.5, 125, 125);
+      x.globalAlpha = 0.35;
+      x.lineWidth = 1.5;
+      x.beginPath();
+      x.moveTo(64, 0);
+      x.lineTo(64, 128);
+      x.moveTo(0, 64);
+      x.lineTo(128, 64);
+      x.stroke();
+      this.surfTex = new THREE.CanvasTexture(c);
+      this.surfTex.wrapS = this.surfTex.wrapT = THREE.RepeatWrapping;
+      this.surfTex.anisotropy = 4;
+    }
+    const mat = this.ownMat(new THREE.MeshStandardMaterial({
+      color: 0x1a2238, roughness: 0.35, metalness: 0.2, flatShading: true,
+      emissive: new THREE.Color(...tint), emissiveMap: this.surfTex, emissiveIntensity: 0.55,
+    }));
+    const V = (x, y, z) => new THREE.Vector3(x, y, z);
+    const R0 = V(x0, h0, z0);
+    const R1 = V(x0, h1, z1);
+    const L0 = V(x0 - w, h0 - H, z0);
+    const L1 = V(x0 - w, h1 - H, z1);
+    const S0 = V(x0 + w, h0 - H, z0);
+    const S1 = V(x0 + w, h1 - H, z1);
+    const len = Math.abs(z1 - z0);
+    const face = Math.hypot(w, H);
+    const pos = [];
+    const uv = [];
+    // quad a,b,c,d (anti-horário visto de fora) com UV em metros/4
+    const quad = (a, b, c, d, uw, vl) => {
+      for (const [p, u, v] of [[a, 0, 0], [b, uw, 0], [c, uw, vl], [a, 0, 0], [c, uw, vl], [d, 0, vl]]) {
+        pos.push(p.x, p.y, p.z);
+        uv.push(u, v);
+      }
+    };
+    const tri = (a, b, c) => {
+      for (const p of [a, b, c]) {
+        pos.push(p.x, p.y, p.z);
+        uv.push(0, 0);
+      }
+    };
+    const down = z1 < z0;
+    if (down) {
+      quad(L0, R0, R1, L1, face / 4, len / 4);
+      quad(R0, S0, S1, R1, face / 4, len / 4);
+      quad(L1, S1, S0, L0, (2 * w) / 4, len / 4);
+      tri(L0, S0, R0);
+      tri(L1, R1, S1);
+    } else {
+      quad(L1, R1, R0, L0, face / 4, len / 4);
+      quad(R1, S1, S0, R0, face / 4, len / 4);
+      quad(L0, S0, S1, L1, (2 * w) / 4, len / 4);
+      tri(L1, S1, R1);
+      tri(L0, R0, S0);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData.dynamic = true;
+    this.group.add(mesh);
+    // crista e bordas luminosas
+    const edge = new THREE.BufferGeometry().setFromPoints([R0, R1, L0, L1, S0, S1]);
+    const lines = new THREE.LineSegments(edge, this.ownMat(new THREE.LineBasicMaterial({ color: new THREE.Color(tint[0] * 1.4, tint[1] * 1.4, tint[2] * 1.4) })));
+    lines.userData.dynamic = true;
+    this.group.add(lines);
+    return mesh;
+  }
+
+  // Rampa de surf que só existe num dos mundos do Véu.
+  dimRamp(x0, z0, z1, h0, h1, w, H, d) {
+    const tint = d ? [1.4, 0.4, 2.4] : [0.3, 1.1, 2.2];
+    const mesh = this.surfRamp(x0, z0, z1, h0, h1, w, H, tint);
+    const ramp = this.world.ramps[this.world.ramps.length - 1];
+    this.dimRamps ??= [];
+    const ghost = this.ownMat(new THREE.MeshBasicMaterial({
+      color: new THREE.Color(...tint).multiplyScalar(0.3), transparent: true, opacity: 0.12,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    }));
+    this.dimRamps.push({ d, ramp, mesh, active: mesh.material, ghost });
+    // registra um bloco "vazio" para o jogo saber que a fase tem dois mundos
+    if (!this.dimObjs.length) this.dimMarker = true;
+    return mesh;
+  }
+
+  // ============================================================ o Colosso
+  // Luta: o Colosso esmaga com o punho (o círculo vermelho avisa) e varre a
+  // arena com o braço (baixo: pule; alto: deslize). Acenda as runas para
+  // feri-lo; com todas acesas ele cai e o portal se abre.
+  colossusBoss({ runes, arena = [-16, -14, 16, 16], y = 0 }) {
+    const col = this.colossusAt(0, y - 30, arena[1] - 38, 1.7);
+    const M = this.M;
+    const boss = {
+      col, y, arena, runes: runes.map(([x, ry, z]) => this.rune(x, ry, z, ['boss'])),
+      state: 'wait', t: 0, step: 0, lit: 0, defeated: false, deadT: 0,
+      target: new THREE.Vector3(),
+    };
+    // punho
+    const fist = new THREE.Group();
+    const knuckles = new THREE.Mesh(boxGeometry(4.2, 2.4, 4.2, 1.5), M.statue);
+    knuckles.castShadow = true;
+    fist.add(knuckles);
+    for (let i = 0; i < 4; i++) {
+      const k = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 1.2), M.statue);
+      k.position.set(-1.5 + i, -0.9, 2.0);
+      fist.add(k);
+    }
+    const veins = new THREE.Mesh(new THREE.BoxGeometry(4.3, 0.12, 4.3), this.ownMat(new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 0.3, 0.9) })));
+    veins.position.y = -0.6;
+    fist.add(veins);
+    fist.traverse((o) => { o.userData.dynamic = true; });
+    this.group.add(fist);
+    boss.fist = fist;
+    boss.fistC = this.world.add(-2.1, y + 20, -2.1, 2.1, y + 22.4, 2.1, KILL);
+    boss.fistC.enabled = false;
+    boss.fistC.noGrab = true;
+    this.dyn.push(boss.fistC);
+    // aviso do esmagamento
+    const warnMat = this.ownMat(new THREE.MeshBasicMaterial({
+      color: new THREE.Color(2.6, 0.2, 0.5), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    }));
+    boss.warn = new THREE.Mesh(new THREE.RingGeometry(2.6, 3.0, 40), warnMat);
+    boss.warn.rotation.x = -Math.PI / 2;
+    boss.warn.userData.dynamic = true;
+    const warnFill = new THREE.Mesh(new THREE.CircleGeometry(2.6, 40), warnMat.clone());
+    boss.warnFill = warnFill;
+    this.ownMat(warnFill.material);
+    boss.warn.add(warnFill);
+    this.group.add(boss.warn);
+    // braço que varre a arena
+    const armMat = this.ownMat(new THREE.MeshBasicMaterial({ color: new THREE.Color(1.3, 0.12, 0.45), transparent: true, opacity: 1 }));
+    boss.armMat = armMat;
+    const w = arena[2] - arena[0] + 4;
+    boss.arm = new THREE.Mesh(new THREE.BoxGeometry(w, 1, 0.5), armMat);
+    boss.arm.userData.dynamic = true;
+    boss.arm.visible = false;
+    this.group.add(boss.arm);
+    boss.armC = this.world.add(arena[0] - 2, -100, -0.25, arena[2] + 2, -99, 0.25, KILL);
+    boss.armC.enabled = false;
+    this.dyn.push(boss.armC);
+    this.boss = boss;
+    this.resetBoss();
+    return boss;
+  }
+
+  resetBoss() {
+    const b = this.boss;
+    if (!b) return;
+    b.state = 'wait';
+    b.t = 0;
+    b.step = 0;
+    b.lit = 0;
+    b.defeated = false;
+    b.deadT = 0;
+    b.fistC.enabled = false;
+    b.fistC.kind = KILL;
+    this.placeFist(0, b.y + 20, 0);
+    b.fist.visible = false;
+    b.warn.material.opacity = 0;
+    b.warnFill.material.opacity = 0;
+    b.arm.visible = false;
+    b.armC.enabled = false;
+    b.col.g.position.y = b.col.baseY;
+    b.col.g.rotation.x = 0;
+    if (this.goal) {
+      this.goal.locked = true;
+      this.goal.group.visible = false;
+    }
+  }
+
+  placeFist(x, y, z) {
+    const c = this.boss.fistC;
+    c.translate(x - 2.1 - c.minX, y - c.minY, z - 2.1 - c.minZ);
+    this.boss.fist.position.set(x, y + 1.2, z);
+  }
+
+  placeArm(z, y0, y1) {
+    const b = this.boss;
+    const c = b.armC;
+    c.translate(0, y0 - c.minY, z - 0.25 - c.minZ);
+    c.maxY = y1;
+    b.arm.position.set((b.arena[0] + b.arena[2]) / 2, (y0 + y1) / 2, z);
+    b.arm.scale.y = y1 - y0;
+  }
+
+  updateBoss(dt) {
+    const b = this.boss;
+    if (!b) return;
+    const lit = b.runes.filter((r) => r.lit).length;
+    if (lit > b.lit) {
+      b.lit = lit;
+      this.onBossEvent?.('hit', b.lit, b.runes.length);
+      b.col.g.rotation.x = -0.15;
+      if (lit >= b.runes.length && !b.defeated) {
+        b.defeated = true;
+        b.fistC.enabled = false;
+        b.armC.enabled = false;
+        b.arm.visible = false;
+        b.warn.material.opacity = 0;
+        b.warnFill.material.opacity = 0;
+        if (this.goal) {
+          this.goal.locked = false;
+          this.goal.group.visible = true;
+        }
+        this.onBossEvent?.('defeat', b.lit, b.runes.length);
+      }
+    }
+    b.col.g.rotation.x *= Math.exp(-3 * dt);
+    if (b.defeated) {
+      // o Colosso afunda no abismo
+      b.deadT += dt;
+      b.col.g.position.y = b.col.baseY - b.deadT * b.deadT * 3;
+      b.col.g.rotation.x = Math.min(0.5, b.deadT * 0.15);
+      if (b.fist.visible) {
+        b.fist.position.y -= dt * 20;
+        if (b.fist.position.y < b.y - 30) b.fist.visible = false;
+      }
+      return;
+    }
+    const pl = this.playerRef;
+    if (!pl) return;
+    // ritmo dos ataques: mais rápido a cada runa
+    const pace = [1.0, 0.82, 0.68][Math.min(b.lit, 2)];
+    const pattern = ['slam', 'sweepLow', 'slam', 'sweepHigh', 'slam', 'slam'];
+    b.t += dt;
+    const [ax0, az0, ax1, az1] = b.arena;
+    switch (b.state) {
+      case 'wait':
+        if (b.t > 2.2 * pace) {
+          b.state = pattern[b.step % pattern.length];
+          b.step++;
+          b.t = 0;
+          if (b.state === 'slam') {
+            b.target.set(THREE.MathUtils.clamp(pl.pos.x, ax0 + 2.2, ax1 - 2.2), b.y, THREE.MathUtils.clamp(pl.pos.z, az0 + 2.2, az1 - 2.2));
+            b.fist.visible = true;
+            b.fistC.kind = KILL;
+            b.fistC.enabled = false;
+            this.placeFist(b.target.x, b.y + 16, b.target.z);
+            b.warn.position.set(b.target.x, b.y + 0.06, b.target.z);
+            this.onBossEvent?.('warn');
+          } else {
+            b.arm.visible = true;
+            b.armC.enabled = false;
+            const low = b.state === 'sweepLow';
+            b.armY = low ? [b.y + 0.05, b.y + 0.65] : [b.y + 1.05, b.y + 2.4];
+            this.placeArm(az0 - 2, ...b.armY);
+            this.onBossEvent?.(low ? 'sweepLow' : 'sweepHigh');
+          }
+        }
+        break;
+      case 'slam': {
+        const tele = 1.1 * pace;
+        if (b.t < tele) {
+          const k = b.t / tele;
+          b.warn.material.opacity = 0.5 + 0.5 * Math.sin(b.t * 20);
+          b.warnFill.material.opacity = k * 0.35;
+          b.warn.scale.setScalar(1.25 - k * 0.25);
+          this.placeFist(b.target.x, b.y + 16 - k * 3, b.target.z);
+        } else if (b.t < tele + 0.2) {
+          const k = (b.t - tele) / 0.2;
+          b.fistC.enabled = true;
+          this.placeFist(b.target.x, b.y + 13 * (1 - k * k), b.target.z);
+        } else if (!b.landed) {
+          b.landed = true;
+          this.placeFist(b.target.x, b.y, b.target.z);
+          b.warn.material.opacity = 0;
+          b.warnFill.material.opacity = 0;
+          this.onBossEvent?.('slam', b.target);
+        } else if (b.t > tele + 0.32 && b.fistC.kind === KILL) {
+          b.fistC.kind = SOLID; // depois do impacto vira chão: dá para subir nele
+        } else if (b.t > tele + 0.2 + 1.6) {
+          // sobe de volta (quem estiver em cima vai junto)
+          const k = Math.min(1, (b.t - tele - 1.8) / 1.4);
+          this.placeFist(b.target.x, b.y + 16 * k * k, b.target.z);
+          if (k >= 1) {
+            b.landed = false;
+            b.fistC.enabled = false;
+            b.fist.visible = false;
+            b.state = 'wait';
+            b.t = 0;
+          }
+        }
+        break;
+      }
+      case 'sweepLow':
+      case 'sweepHigh': {
+        const tele = 0.9 * pace;
+        const dur = 2.4 * pace;
+        if (b.t < tele) {
+          b.armMat.opacity = 0.25 + 0.25 * Math.sin(b.t * 18);
+        } else if (b.t < tele + dur) {
+          b.armMat.opacity = 1;
+          b.armC.enabled = true;
+          const k = (b.t - tele) / dur;
+          this.placeArm(az0 - 2 + (az1 - az0 + 4) * k, ...b.armY);
+        } else {
+          b.arm.visible = false;
+          b.armC.enabled = false;
+          b.state = 'wait';
+          b.t = 0;
+        }
+        break;
+      }
+      default:
+        break;
+    }
   }
 
   // A Sombra: um eco do andarilho que refaz o seu caminho com atraso.
@@ -1391,7 +1719,8 @@ export class LevelBuilder {
 
   resetMechanics() {
     for (const a of this.anchors) a.hot = 0;
-    if (this.dimObjs.length) this.setDimension(0);
+    if (this.hasDimensions) this.setDimension(0);
+    this.resetBoss();
     for (const g of this.gates) {
       g.open = 0;
       g.target = 0;
@@ -1417,6 +1746,7 @@ export class LevelBuilder {
   }
 
   updateMechanics(dt) {
+    this.updateBoss(dt);
     for (const p of this.phases) {
       const f = (((this.time / p.period + p.phase) % 1) + 1) % 1;
       p.solid = f < p.on;
@@ -1649,7 +1979,7 @@ export class LevelBuilder {
       this.goal.mat.uniforms.uTime.value = time;
       this.goal.ring.rotation.z = time * 0.5;
       this.goal.light.intensity = 22 + Math.sin(time * 4) * 6;
-      if (Math.random() < dt * 20) {
+      if (Math.random() < dt * 20 && !this.goal.locked) {
         const p = this.goal.pos;
         const a = Math.random() * Math.PI * 2;
         this.effects.sparks(p.x + Math.cos(a) * 1.6, p.y + 1.9 + Math.sin(a) * 1.6, p.z, 1, { speed: 0.5, life: 1.2, gravity: -1.2, size: 0.1 });
@@ -1716,7 +2046,7 @@ export class LevelBuilder {
       f.mesh.visible = false;
       events.push({ type: 'fragment', pos: f.pos });
     }
-    if (this.goal) {
+    if (this.goal && !this.goal.locked) {
       const g = this.goal.pos;
       if (Math.hypot(px - g.x, pz - g.z) < 1.8 && player.pos.y > g.y - 0.6 && player.pos.y < g.y + 3) events.push({ type: 'goal' });
     }

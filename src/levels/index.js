@@ -3,6 +3,8 @@
 import { despertar, comboio, saltos, laminas, desabamento, engrenagens, travessia, corredor, torre, tempestade, ceu, fuga } from './runs.js';
 import { fendas, gancho, ventos, ritmo, espelho, sombra, abismo, coracao } from './mechanics.js';
 import { buildAbbey } from './abbey.js';
+import { surf1 } from './surf.js';
+import { surf2, labirinto, ancoras, prova, colosso } from './trials.js';
 
 export const LEVELS = [
   // I — O Despertar
@@ -20,18 +22,25 @@ export const LEVELS = [
   { id: 'engrenagens', chapter: 2, name: 'Engrenagens', subtitle: 'Plataformas que não esperam', env: 'tempestade', medals: [20, 27, 38], build: engrenagens },
   { id: 'torre', chapter: 2, name: 'Torre da Maré', subtitle: 'Suba antes que a maré suba', env: 'tempestade', medals: [16, 20, 26], build: torre },
   { id: 'ceu', chapter: 2, name: 'Céu Partido', subtitle: 'Ilhas suspensas sobre o nada', env: 'aurora', medals: [12, 16, 24], build: ceu },
-  { id: 'fendas', chapter: 2, name: 'Fendas', subtitle: 'Deslize por baixo da morte', env: 'crepusculo', medals: [14, 18, 26], build: fendas, isNew: true },
-  { id: 'gancho', chapter: 2, name: 'Âncoras de Luz', subtitle: 'O Gancho do Véu', env: 'aurora', medals: [17, 22, 32], build: gancho, isNew: true },
-  { id: 'ventos', chapter: 2, name: 'Ventos Uivantes', subtitle: 'Correntes que levantam e empurram', env: 'tempestade', medals: [17, 22, 32], build: ventos, isNew: true },
+  { id: 'fendas', chapter: 2, name: 'Fendas', subtitle: 'Deslize por baixo da morte', env: 'crepusculo', medals: [14, 18, 26], build: fendas },
+  { id: 'gancho', chapter: 2, name: 'Âncoras de Luz', subtitle: 'O Gancho do Véu', env: 'aurora', medals: [17, 22, 32], build: gancho },
+  { id: 'ventos', chapter: 2, name: 'Ventos Uivantes', subtitle: 'Correntes que levantam e empurram', env: 'tempestade', medals: [17, 22, 32], build: ventos },
+  { id: 'surf1', chapter: 2, name: 'Ondas de Luz', subtitle: 'Surf: deslize nas rampas', env: 'aurora', medals: [26, 32, 45], build: surf1, isNew: true },
   // IV — O Outro Lado
-  { id: 'ritmo', chapter: 3, name: 'Respiração', subtitle: 'Pontes que pulsam', env: 'aurora', medals: [17, 22, 32], build: ritmo, isNew: true },
-  { id: 'espelho', chapter: 3, name: 'O Outro Lado', subtitle: 'Dois mundos, uma tecla', env: 'noite', medals: [16, 21, 30], build: espelho, isNew: true },
-  { id: 'sombra', chapter: 3, name: 'A Sombra', subtitle: 'Não pare', env: 'furia', medals: [17, 21, 28], build: sombra, isNew: true },
-  { id: 'abismo', chapter: 3, name: 'Fundo do Mundo', subtitle: 'Gancho, vento e os dois lados', env: 'crepusculo', medals: [21, 27, 38], build: abismo, isNew: true },
+  { id: 'ritmo', chapter: 3, name: 'Respiração', subtitle: 'Pontes que pulsam', env: 'aurora', medals: [17, 22, 32], build: ritmo },
+  { id: 'espelho', chapter: 3, name: 'O Outro Lado', subtitle: 'Dois mundos, uma tecla', env: 'noite', medals: [16, 21, 30], build: espelho },
+  { id: 'sombra', chapter: 3, name: 'A Sombra', subtitle: 'Não pare', env: 'furia', medals: [17, 21, 28], build: sombra },
+  { id: 'abismo', chapter: 3, name: 'Fundo do Mundo', subtitle: 'Gancho, vento e os dois lados', env: 'crepusculo', medals: [21, 27, 38], build: abismo },
+  { id: 'labirinto', chapter: 3, name: 'Labirinto de Runas', subtitle: 'Portões, runas e os dois mundos', env: 'noite', medals: [24, 30, 42], build: labirinto, isNew: true },
   // V — O Coração do Véu
   {
     id: 'abadia', chapter: 4, name: 'Abadia Submersa', subtitle: 'Furtividade e o Artefato do Véu', env: 'noite', type: 'stealth', music: 'calm',
     medals: [70, 110, 180], build: buildAbbey,
   },
-  { id: 'coracao', chapter: 4, name: 'Coração do Véu', subtitle: 'O Colosso e o rasgo', env: 'furia', medals: [32, 40, 52], build: coracao, final: true, isNew: true },
+  { id: 'coracao', chapter: 4, name: 'Coração do Véu', subtitle: 'A corrida até o Colosso', env: 'furia', medals: [32, 40, 52], build: coracao },
+  { id: 'colosso', chapter: 4, name: 'O Colosso', subtitle: 'Acenda as três runas', env: 'furia', medals: [50, 70, 100], build: colosso, final: true, boss: true, music: 'final', isNew: true },
+  // VI — Além do Véu (provas difíceis)
+  { id: 'surf2', chapter: 5, name: 'Crista Partida', subtitle: 'Surf difícil: barras e os dois mundos', env: 'crepusculo', medals: [30, 36, 50], build: surf2, isNew: true },
+  { id: 'ancoras', chapter: 5, name: 'Tempestade de Âncoras', subtitle: 'Gancho, vento e a Sombra', env: 'tempestade', medals: [22, 28, 40], build: ancoras, isNew: true },
+  { id: 'prova', chapter: 5, name: 'Prova do Tecelão', subtitle: 'Todas as mecânicas, uma fase', env: 'aurora', medals: [48, 60, 80], build: prova, isNew: true },
 ];

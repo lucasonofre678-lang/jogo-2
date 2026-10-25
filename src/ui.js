@@ -5,6 +5,7 @@
 import './style.css';
 import { CHAPTERS, LORE, PROLOGUE, EPILOGUE } from './lore.js';
 import { SKINS, skinUnlocked } from './skins.js';
+import { REBINDABLE, keyName } from './input.js';
 
 const RING_LEN = 2 * Math.PI * 30;
 const MEDALS = ['ouro', 'prata', 'bronze'];
@@ -88,6 +89,7 @@ export class UI {
           <div class="veil-text"><kbd>Q</kbd><span>Passo do Véu</span></div>
         </div>
         <div id="speed"><span id="speed-value">0</span><small>m/s</small></div>
+        <div id="boss" class="hidden"><div class="boss-name">O Colosso</div><div id="boss-runes"></div></div>
         <div id="dim" class="hidden"><kbd>F</kbd><span id="dim-label">Mundo real</span></div>
         <div id="frag-ind" title="fragmento de memória desta fase">◆</div>
         <div id="prompt"></div>
@@ -177,6 +179,7 @@ export class UI {
         <div class="screen-inner panel">
           <h2>Andarilho</h2>
           <p class="small">Mantos desbloqueados por feitos. Clique para vestir.</p>
+          <div id="pose-row"></div>
           <div id="skin-list"></div>
           <button class="cta" id="wardrobe-back">Voltar</button>
         </div>
@@ -371,6 +374,21 @@ export class UI {
     this.veilTint.style.opacity = d === 1 ? '1' : '0';
   }
 
+  // Runas acesas no Colosso (null esconde a barra).
+  setBoss(lit, total) {
+    const el = this.$('boss');
+    el.classList.toggle('hidden', lit === null);
+    if (lit === null) return;
+    this.$('boss-runes').innerHTML = Array.from({ length: total }, (_, i) => `<i class="${i < lit ? 'on' : ''}">◆</i>`).join('');
+  }
+
+  // Mostra as teclas atuais no HUD.
+  setKeyLabels(input) {
+    this.hud.querySelector('.veil-text kbd').textContent = input.label('veil');
+    this.$('restart-tip').querySelector('kbd').textContent = input.label('restart');
+    this.dimEl.querySelector('kbd').textContent = input.label('shift');
+  }
+
   setPrompt(html) {
     if (html === this.lastPrompt) return;
     this.lastPrompt = html;
@@ -555,7 +573,7 @@ export class UI {
   }
 
   // Opções: cada controle chama onChange(chave, valor).
-  buildOptions(settings, onChange, onReset) {
+  buildOptions(settings, onChange, onReset, input) {
     const list = this.$('options-list');
     list.innerHTML = '';
     const row = (label, control) => {
@@ -606,6 +624,41 @@ export class UI {
     row('Fantasma do recorde', cycle('ghost', [true, false], ['ligado', 'desligado']));
     row('Tremor de câmera', cycle('shake', [true, false], ['ligado', 'desligado']));
     row('Dicas na tela', cycle('hints', [true, false], ['ligadas', 'desligadas']));
+    // teclas
+    const head = document.createElement('div');
+    head.className = 'opt-head';
+    head.textContent = 'Teclas (clique e aperte a nova tecla)';
+    list.appendChild(head);
+    for (const [action, label] of REBINDABLE) {
+      const b = document.createElement('button');
+      b.className = 'opt-btn key';
+      const show = () => { b.textContent = input ? input.label(action) : '?'; };
+      show();
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        b.textContent = 'aperte uma tecla…';
+        b.classList.add('wait');
+        const grab = (ev) => {
+          ev.preventDefault();
+          ev.stopImmediatePropagation();
+          b.classList.remove('wait');
+          if (ev.code !== 'Escape') onChange('keys', { ...(settings.keys ?? {}), [action]: ev.code });
+          show();
+        };
+        window.addEventListener('keydown', grab, { capture: true, once: true });
+      });
+      row(label, b);
+    }
+    const resetKeys = document.createElement('button');
+    resetKeys.className = 'opt-btn';
+    resetKeys.textContent = 'Teclas padrão';
+    resetKeys.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onChange('keys', {});
+      this.buildOptions(settings, onChange, onReset, input);
+    });
+    row('Restaurar', resetKeys);
+
     const reset = document.createElement('button');
     reset.className = 'opt-btn danger';
     reset.textContent = 'Apagar progresso';
@@ -642,6 +695,34 @@ export class UI {
         b.disabled = true;
       }
       list.appendChild(b);
+    }
+  }
+
+  // Botões de prévia de animação no guarda-roupa.
+  buildPoses(onPick) {
+    const row = this.$('pose-row');
+    row.innerHTML = '';
+    for (const [id, label] of [['auto', 'Todas'], ['parado', 'Parado'], ['marcha', 'Marcha'], ['corrida', 'Corrida'], ['salto', 'Salto'],
+      ['surf', 'Surf'], ['deslize', 'Deslize'], ['gancho', 'Gancho'], ['esgueirar', 'Esgueirar']]) {
+      const b = document.createElement('button');
+      b.className = 'pose-btn';
+      b.dataset.pose = id;
+      b.textContent = label;
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        onPick(id);
+      });
+      row.appendChild(b);
+    }
+  }
+
+  setDemoPose(pose, chosen) {
+    const key = pose + '|' + chosen;
+    if (key === this.lastPose) return;
+    this.lastPose = key;
+    for (const b of this.$('pose-row').children) {
+      b.classList.toggle('on', b.dataset.pose === chosen);
+      b.classList.toggle('playing', b.dataset.pose === pose);
     }
   }
 

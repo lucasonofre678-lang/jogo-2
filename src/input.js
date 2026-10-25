@@ -6,6 +6,10 @@ const BLOCKED_DEFAULTS = new Set(['Space', 'Tab', 'Enter', 'KeyQ', 'KeyE', 'KeyF
 
 // ação → teclas do teclado e botões do controle (índices do layout padrão)
 const ACTIONS = {
+  up: { keys: ['KeyW', 'ArrowUp'], pad: [] },
+  down: { keys: ['KeyS', 'ArrowDown'], pad: [] },
+  left: { keys: ['KeyA', 'ArrowLeft'], pad: [] },
+  right: { keys: ['KeyD', 'ArrowRight'], pad: [] },
   jump: { keys: ['Space'], pad: [0] }, // A / ✕
   veil: { keys: ['KeyQ'], pad: [2, 5] }, // X / □, RB
   grapple: { keys: ['KeyE'], pad: [4, 7] }, // LB, RT
@@ -17,6 +21,30 @@ const ACTIONS = {
   view: { keys: ['KeyV'], pad: [11] }, // R3
   confirm: { keys: ['Enter'], pad: [0] },
 };
+
+// ações que o jogador pode trocar de tecla (a primeira tecla de cada uma)
+export const REBINDABLE = [
+  ['up', 'Frente'], ['down', 'Trás'], ['left', 'Esquerda'], ['right', 'Direita'],
+  ['jump', 'Saltar'], ['veil', 'Passo do Véu'], ['grapple', 'Gancho'], ['shift', 'Outro lado'],
+  ['sneak', 'Deslizar / esgueirar'], ['walk', 'Andar'], ['restart', 'Reiniciar'], ['view', 'Câmera 1ª/3ª pessoa'],
+];
+const DEFAULT_KEYS = Object.fromEntries(Object.entries(ACTIONS).map(([k, v]) => [k, v.keys[0]]));
+
+const NAMES = { Space: 'Espaço', ShiftLeft: 'Shift', ShiftRight: 'Shift D', ControlLeft: 'Ctrl', ControlRight: 'Ctrl D', AltLeft: 'Alt',
+  ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Escape: 'Esc', Enter: 'Enter', Tab: 'Tab', Backspace: '⌫',
+  CapsLock: 'Caps', Backquote: "'", Minus: '-', Equal: '=', BracketLeft: '´', BracketRight: '[', Semicolon: 'Ç', Quote: '~',
+  Backslash: ']', Comma: ',', Period: '.', Slash: ';', IntlBackslash: '\\', IntlRo: '/' };
+
+// Nome legível de uma tecla (código físico do layout ABNT/QWERTY).
+export function keyName(code) {
+  if (!code) return '?';
+  if (NAMES[code]) return NAMES[code];
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Numpad')) return 'Num ' + code.slice(6);
+  if (code.startsWith('Mouse')) return code;
+  return code;
+}
 
 const DEADZONE = 0.18;
 
@@ -68,6 +96,19 @@ export class Input {
 
     window.addEventListener('gamepadconnected', () => this.onPadChange?.(true));
     window.addEventListener('gamepaddisconnected', () => this.onPadChange?.(false));
+  }
+
+  // Troca a tecla principal das ações: { jump: 'KeyK', ... }
+  setBindings(map) {
+    for (const [action, def] of Object.entries(DEFAULT_KEYS)) {
+      const code = map[action] ?? def;
+      ACTIONS[action].keys[0] = code;
+      BLOCKED_DEFAULTS.add(code);
+    }
+  }
+
+  label(action) {
+    return keyName(ACTIONS[action]?.keys[0]);
   }
 
   // Lê o controle uma vez por quadro (antes de consultar as ações).

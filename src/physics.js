@@ -106,13 +106,63 @@ function rayBox(c, ox, oy, oz, dx, dy, dz) {
   return tmin;
 }
 
+// Rampa de surf: prisma triangular deitado ao longo de z. A crista fica em
+// x0 e vai da altura h0 (em z0) a h1 (em z1); as duas faces descem até
+// w metros para cada lado, caindo H metros.
+export class Ramp {
+  constructor({ x0, z0, z1, h0, h1, w, H }) {
+    Object.assign(this, { x0, z0, z1, h0, h1, w, H });
+    this.zmin = Math.min(z0, z1);
+    this.zmax = Math.max(z0, z1);
+    this.c = H / w;
+    this.slopeZ = (h1 - h0) / (z1 - z0);
+    this.enabled = true;
+  }
+
+  ridgeAt(z) {
+    return this.h0 + this.slopeZ * (z - this.z0);
+  }
+
+  // Altura da superfície em (x, z), ou null fora da rampa.
+  heightAt(x, z) {
+    if (z < this.zmin || z > this.zmax) return null;
+    const ax = Math.abs(x - this.x0);
+    if (ax > this.w) return null;
+    return this.ridgeAt(z) - this.c * ax;
+  }
+
+  // Esfera (centro x,y,z e raio r) encostando numa face: normal e profundidade.
+  contact(x, y, z, r) {
+    if (z < this.zmin || z > this.zmax) return null;
+    const dx = x - this.x0;
+    const ax = Math.abs(dx);
+    if (ax > this.w) return null;
+    const side = dx < 0 ? -1 : 1;
+    const f = y - this.ridgeAt(z) + this.c * ax;
+    const gx = this.c * side;
+    const gz = -this.slopeZ;
+    const L = Math.sqrt(gx * gx + 1 + gz * gz);
+    const d = f / L;
+    if (d >= r || d < -1.2) return null;
+    return { nx: gx / L, ny: 1 / L, nz: gz / L, depth: r - d };
+  }
+}
+
 export class PhysicsWorld {
   constructor() {
     this.colliders = [];
+    this.ramps = [];
   }
 
   clear() {
     this.colliders.length = 0;
+    this.ramps.length = 0;
+  }
+
+  addRamp(def) {
+    const r = new Ramp(def);
+    this.ramps.push(r);
+    return r;
   }
 
   add(minX, minY, minZ, maxX, maxY, maxZ, kind = SOLID) {
@@ -194,6 +244,13 @@ export class PhysicsWorld {
 
   groundBelow(x, z, r, fromY, maxDrop, mask = SOLID) {
     const c = this.groundColliderBelow(x, z, r, fromY, maxDrop, mask);
-    return c ? c.maxY : null;
+    let best = c ? c.maxY : null;
+    for (const ramp of this.ramps) {
+      if (!ramp.enabled) continue;
+      const h = ramp.heightAt(x, z);
+      if (h === null || h > fromY + 0.5 || h < fromY - maxDrop) continue;
+      if (best === null || h > best) best = h;
+    }
+    return best;
   }
 }
