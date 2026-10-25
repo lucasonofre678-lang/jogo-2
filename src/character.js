@@ -173,7 +173,7 @@ class Cloth {
         P[j + 1] += vy + (wy - this.gravity + fl * 0.4) * h2;
         P[j + 2] += vz + (wz + side.z * fl) * h2;
       }
-      for (let it = 0; it < 3; it++) {
+      for (let it = 0; it < 4; it++) {
         for (let m = 0; m < cons.length; m += 4) {
           const a = cons[m];
           const b = cons[m + 1];
@@ -614,7 +614,7 @@ export class Character {
     armBand.rotation.x = Math.PI / 2;
 
     // luz de preenchimento própria: o andarilho fica legível em qualquer cenário
-    this.fill = new THREE.PointLight(0xbcd2ff, 7, 5, 1.6);
+    this.fill = new THREE.PointLight(0xbcd2ff, 4.5, 5, 1.6);
     this.fill.position.set(0.8, 2.3, 1.6);
     root.add(this.fill);
     Object.assign(this, { root, body, hips, spine, neck, head });
@@ -626,7 +626,7 @@ export class Character {
     this.capePins = [];
     for (let c = 0; c < CAPE_COLS; c++) {
       const u = c / (CAPE_COLS - 1) * 2 - 1;
-      this.capePins.push({ obj: spine, local: new THREE.Vector3(u * 0.22, 0.42 - 0.05 * u * u, -0.2 - 0.06 * (1 - u * u)) });
+      this.capePins.push({ obj: spine, local: new THREE.Vector3(u * 0.22, 0.42 - 0.05 * u * u, -0.24 - 0.06 * (1 - u * u)) });
     }
     this.cape = new Cloth(scene, capeMat, { cols: CAPE_COLS, rows: 11, length: 1.05, widthTop: 0.44, widthBottom: 0.62, pins: this.capePins, drag: 3.2, flutter: 1 });
     this.scarves = [[-0.11, -0.045, 0.52], [0.045, 0.11, 0.64]].map(([x0, x1, len]) => new Cloth(scene, scarfMat, {
@@ -735,10 +735,9 @@ export class Character {
     const w = (obj, x, y, z) => this.v.set(x, y, z).applyMatrix4(obj.matrixWorld).toArray();
     const head = w(this.head, 0, 0.16, 0);
     C.spheres.push([...head, 0.24]);
-    const mantle = w(this.spine, 0, 0.3, -0.02);
-    C.spheres.push([...mantle, 0.36]);
-    const chest = w(this.spine, 0, 0.12, 0);
-    C.spheres.push([...chest, 0.32]);
+    // ombros + peito numa esfera só (os pinos da capa ficam fora dela)
+    const mantle = w(this.spine, 0, 0.1, 0);
+    C.spheres.push([...mantle, 0.39]);
     const skirtA = w(this.hips, 0, -0.18, -0.02);
     C.spheres.push([...skirtA, 0.33]);
     const skirtB = w(this.hips, 0, -0.42, -0.03);
