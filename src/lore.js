@@ -5,6 +5,14 @@ export const PROLOGUE = `Entre o mundo dos vivos e o dos mortos existe o Véu �
   que os monges da Abadia guardavam. Numa noite de lua nova, ele se rasgou.
   Você acorda nas ruínas, sem nome e sem memória, com uma runa pulsando na mão.`;
 
+// a abertura mostra o prólogo em linhas
+export const PROLOGUE_LINES = [
+  'Entre o mundo dos vivos e o dos mortos existe o Véu — um tecido de luz.',
+  'Os monges da Abadia o guardavam. Numa noite de lua nova, ele se rasgou.',
+  'Você acorda nas ruínas, sem nome e sem memória.',
+  'Na sua mão, uma runa ainda pulsa.',
+];
+
 export const CHAPTERS = [
   { num: 'I', name: 'O Despertar', text: 'Um andarilho acorda nas ruínas da Abadia Submersa, sem nome e sem memória.' },
   { num: 'II', name: 'A Ferrovia dos Mortos', text: 'O Comboio Espectral, que levava as almas para o outro lado, enlouqueceu.' },

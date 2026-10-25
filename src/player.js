@@ -207,6 +207,7 @@ export class Player {
     this.landSquash = 0;
     this.roll = 0;
     this.celebrate = false;
+    this.wake = 0;
     this.swing.anchor = null;
     this.facing = yaw + Math.PI; // de costas para a câmera
     this.fallStartY = pos.y;

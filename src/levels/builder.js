@@ -1058,6 +1058,8 @@ export class LevelBuilder {
     cathedral.lookAt(cx, 0, cz);
     this.group.add(cathedral);
 
+    this.sceneryTheme(cx, cz, radius, rand);
+
     // rochas flutuantes ao redor
     for (let i = 0; i < 14; i++) {
       const side = i % 2 ? 1 : -1;
@@ -1086,6 +1088,190 @@ export class LevelBuilder {
       plane.userData.dynamic = true;
       this.group.add(plane);
       this.mists.push({ tex, speed: 0.004 / sc });
+    }
+  }
+
+  // Cenário próprio de cada capítulo (longe da pista, só visual).
+  sceneryTheme(cx, cz, radius, rand) {
+    const ch = this.def.chapter ?? 0;
+    const M = this.M;
+    const glow = (r, g, b) => this.ownMat(new THREE.MeshBasicMaterial({ color: new THREE.Color(r, g, b), fog: false }));
+    const soft = (r, g, b, o) => this.ownMat(new THREE.MeshBasicMaterial({
+      color: new THREE.Color(r, g, b), transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false,
+    }));
+    const add = (m, float = 0) => {
+      m.userData.dynamic = float > 0;
+      this.group.add(m);
+      if (float > 0) this.floater(m, float, 0.15 + rand() * 0.2, (rand() - 0.5) * 0.08);
+      return m;
+    };
+    // ponto ao redor da pista, fora da área jogável
+    const around = (minR, spread) => {
+      const side = rand() < 0.5 ? -1 : 1;
+      const x = cx + side * (minR + rand() * spread);
+      const z = cz + (rand() - 0.5) * radius * 1.6;
+      return [x, z];
+    };
+    if (ch === 0) {
+      // arcos e campanários em ruínas flutuando
+      for (let i = 0; i < 9; i++) {
+        const [x, z] = around(32, 45);
+        const y = -6 + rand() * 14;
+        const g = new THREE.Group();
+        g.position.set(x, y, z);
+        g.rotation.y = rand() * Math.PI;
+        const h = 6 + rand() * 6;
+        const w = 4 + rand() * 3;
+        for (const s of [-1, 1]) {
+          const p = new THREE.Mesh(new THREE.BoxGeometry(1, h, 1), M.silhouette);
+          p.position.set((s * w) / 2, h / 2, 0);
+          g.add(p);
+        }
+        const top = new THREE.Mesh(new THREE.TorusGeometry(w / 2, 0.5, 4, 10, Math.PI), M.silhouette);
+        top.position.y = h;
+        g.add(top);
+        const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(w * 0.7, 0), M.silhouette);
+        rock.scale.y = 0.5;
+        rock.position.y = -0.5;
+        g.add(rock);
+        add(g, 0.5);
+      }
+      const bell = glow(0.6, 0.9, 2.0);
+      for (let i = 0; i < 4; i++) {
+        const [x, z] = around(60, 40);
+        const t = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 3.2, 26, 6), M.silhouette);
+        t.position.set(x, 4, z);
+        t.rotation.z = (rand() - 0.5) * 0.5;
+        add(t);
+        const b = new THREE.Mesh(new THREE.SphereGeometry(1.2, 8, 6), bell);
+        b.position.set(x, 15, z);
+        add(b);
+      }
+    } else if (ch === 1) {
+      // trilhos espectrais soltos no céu e lanternas
+      const rail = glow(0.3, 0.8, 2.0);
+      for (let i = 0; i < 10; i++) {
+        const [x, z] = around(26, 50);
+        const g = new THREE.Group();
+        g.position.set(x, -4 + rand() * 18, z);
+        g.rotation.set((rand() - 0.5) * 0.3, rand() * Math.PI, (rand() - 0.5) * 0.4);
+        const len = 20 + rand() * 30;
+        for (const s of [-1, 1]) {
+          const r = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, len), rail);
+          r.position.x = s * 1.4;
+          g.add(r);
+        }
+        for (let k = -len / 2; k < len / 2; k += 2.2) {
+          const sl = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.3, 0.5), M.silhouette);
+          sl.position.set(0, -0.25, k);
+          g.add(sl);
+        }
+        add(g, 0.4);
+      }
+      const lamp = glow(2.2, 1.5, 0.6);
+      for (let i = 0; i < 12; i++) {
+        const [x, z] = around(20, 40);
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 9, 5), M.silhouette);
+        pole.position.set(x, 2, z);
+        add(pole);
+        const l = new THREE.Mesh(new THREE.OctahedronGeometry(0.6, 0), lamp);
+        l.position.set(x, 7, z);
+        add(l, 0.2);
+      }
+    } else if (ch === 2) {
+      // ilhas no céu com árvores de cristal e cascatas de luz
+      const crystal = glow(0.2, 0.75, 0.7);
+      const fall = soft(0.2, 0.8, 0.9, 0.18);
+      for (let i = 0; i < 11; i++) {
+        const [x, z] = around(42, 55);
+        const r = 4 + rand() * 7;
+        const g = new THREE.Group();
+        g.position.set(x, -2 + rand() * 22, z);
+        const base = new THREE.Mesh(new THREE.ConeGeometry(r, r * 1.8, 7), M.silhouette);
+        base.rotation.x = Math.PI;
+        base.position.y = -r * 0.9;
+        const top = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.95, 0.8, 7), M.silhouetteFar);
+        g.add(base, top);
+        for (let k = 0; k < 3; k++) {
+          const tree = new THREE.Mesh(new THREE.OctahedronGeometry(0.7 + rand() * 0.8, 0), crystal);
+          tree.scale.y = 2.4;
+          tree.position.set((rand() - 0.5) * r, 2, (rand() - 0.5) * r);
+          g.add(tree);
+        }
+        if (rand() < 0.5) {
+          const wf = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 30), fall);
+          wf.position.set(r * 0.8, -15, 0);
+          wf.rotation.y = Math.PI / 2;
+          g.add(wf);
+        }
+        add(g, 0.8);
+      }
+    } else if (ch === 3) {
+      // o outro lado: cristais violeta enormes e agulhas penduradas no céu
+      const vio = glow(0.55, 0.18, 1.1);
+      const dark = this.ownMat(new THREE.MeshBasicMaterial({ color: 0x14081f, fog: false }));
+      for (let i = 0; i < 12; i++) {
+        const [x, z] = around(28, 50);
+        const c = new THREE.Mesh(new THREE.OctahedronGeometry(2 + rand() * 4, 0), rand() < 0.4 ? vio : dark);
+        c.scale.y = 2 + rand() * 1.5;
+        c.position.set(x, -4 + rand() * 24, z);
+        c.rotation.set(rand(), rand() * 3, rand());
+        add(c, 1.2);
+      }
+      for (let i = 0; i < 10; i++) {
+        const [x, z] = around(22, 60);
+        const sp = new THREE.Mesh(new THREE.ConeGeometry(2 + rand() * 3, 30 + rand() * 30, 4), dark);
+        sp.rotation.x = Math.PI;
+        sp.position.set(x, 45 + rand() * 15, z);
+        add(sp);
+      }
+    } else if (ch === 4) {
+      // coração do Véu: correntes do céu e rasgos vermelhos
+      const red = glow(2.4, 0.25, 0.7);
+      const rift = soft(2.0, 0.2, 0.6, 0.35);
+      for (let i = 0; i < 8; i++) {
+        const [x, z] = around(26, 45);
+        const g = new THREE.Group();
+        g.position.set(x, 10 + rand() * 10, z);
+        for (let k = 0; k < 10; k++) {
+          const link = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.28, 5, 10), M.silhouette);
+          link.position.y = k * 1.5;
+          link.rotation.y = k % 2 ? Math.PI / 2 : 0;
+          g.add(link);
+        }
+        const weight = new THREE.Mesh(new THREE.DodecahedronGeometry(2.4, 0), M.silhouette);
+        weight.position.y = -2;
+        g.add(weight);
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 6), red);
+        eye.position.set(0, -2, 2.2);
+        g.add(eye);
+        add(g, 0.6);
+      }
+      for (let i = 0; i < 5; i++) {
+        const r = new THREE.Mesh(new THREE.PlaneGeometry(3 + rand() * 4, 40 + rand() * 30), rift);
+        const a = rand() * Math.PI * 2;
+        r.position.set(cx + Math.cos(a) * (radius + 40), 40, cz + Math.sin(a) * (radius + 40));
+        r.lookAt(cx, 40, cz);
+        r.rotation.z = (rand() - 0.5) * 0.6;
+        add(r);
+      }
+    } else if (ch === 5) {
+      // além do Véu: anéis de luz e fitas de aurora
+      for (let i = 0; i < 7; i++) {
+        const [x, z] = around(30, 50);
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(6 + rand() * 8, 0.25, 6, 48), glow(0.5 + rand(), 1.0, 2.2));
+        ring.position.set(x, 4 + rand() * 20, z);
+        ring.rotation.set(rand() * 3, rand() * 3, 0);
+        add(ring, 1);
+      }
+      for (let i = 0; i < 4; i++) {
+        const band = new THREE.Mesh(new THREE.PlaneGeometry(radius * 3, 14, 24, 1), soft(0.3, 1.4, 1.0, 0.04));
+        const p = band.geometry.attributes.position;
+        for (let k = 0; k < p.count; k++) p.setY(k, p.getY(k) + Math.sin(p.getX(k) * 0.03 + i) * 8);
+        band.position.set(cx, 120 + i * 14, cz - radius - i * 45);
+        band.rotation.x = 0.15;
+        add(band);
+      }
     }
   }
 
@@ -1423,7 +1609,7 @@ export class LevelBuilder {
   // arena com o braço (baixo: pule; alto: deslize). Acenda as runas para
   // feri-lo; com todas acesas ele cai e o portal se abre.
   colossusBoss({ runes, arena = [-16, -14, 16, 16], y = 0 }) {
-    const col = this.colossusAt(0, y - 30, arena[1] - 38, 1.7);
+    const col = this.colossusAt(0, y - 40, arena[1] - 36, 1.7);
     const M = this.M;
     const boss = {
       col, y, arena, runes: runes.map(([x, ry, z]) => this.rune(x, ry, z, ['boss'])),
@@ -1696,16 +1882,19 @@ export class LevelBuilder {
   // são lâminas criadas pela fase).
   colossusAt(x, y, z, scale = 1) {
     const M = this.M;
+    // pedra escura, mas iluminada pela cena (silhueta pura some no céu)
+    this.colMat ??= this.ownMat(new THREE.MeshStandardMaterial({ color: 0x3a3244, roughness: 0.92, flatShading: true, emissive: 0x16050c, fog: false }));
+    this.colMat2 ??= this.ownMat(new THREE.MeshStandardMaterial({ color: 0x4a4256, roughness: 0.85, flatShading: true, emissive: 0x10040a, fog: false }));
     const g = new THREE.Group();
     g.position.set(x, y, z);
     g.scale.setScalar(scale);
-    const robe = new THREE.Mesh(new THREE.CylinderGeometry(4, 9, 26, 10, 1, true), M.silhouette);
+    const robe = new THREE.Mesh(new THREE.CylinderGeometry(4, 9, 26, 10, 1, true), this.colMat);
     robe.position.y = 13;
-    const chest = new THREE.Mesh(new THREE.CylinderGeometry(6.5, 4.5, 8, 10), M.silhouetteFar);
+    const chest = new THREE.Mesh(new THREE.CylinderGeometry(6.5, 4.5, 8, 10), this.colMat2);
     chest.position.y = 29;
     const head = new THREE.Group();
     head.position.y = 36;
-    const hood = new THREE.Mesh(new THREE.SphereGeometry(4.2, 12, 10), M.silhouette);
+    const hood = new THREE.Mesh(new THREE.SphereGeometry(4.2, 12, 10), this.colMat);
     hood.scale.set(1, 1.15, 1.1);
     const face = new THREE.Mesh(new THREE.SphereGeometry(3, 12, 10), this.ownMat(new THREE.MeshBasicMaterial({ color: 0x020104, fog: false })));
     face.position.set(0, -0.3, 1.9);
@@ -1718,7 +1907,7 @@ export class LevelBuilder {
       e.scale.set(1.6, 0.6, 1);
       return e;
     });
-    const horn = new THREE.Mesh(new THREE.ConeGeometry(2.4, 7, 6), M.silhouette);
+    const horn = new THREE.Mesh(new THREE.ConeGeometry(2.4, 7, 6), this.colMat);
     horn.position.set(0, 3.8, -2.5);
     horn.rotation.x = -1.0;
     head.add(hood, face, ...eyes, horn);
@@ -1726,7 +1915,7 @@ export class LevelBuilder {
     light.position.set(0, 0, 6);
     head.add(light);
     for (const s of [-1, 1]) {
-      const sh = new THREE.Mesh(new THREE.SphereGeometry(4, 10, 8), M.silhouetteFar);
+      const sh = new THREE.Mesh(new THREE.SphereGeometry(4, 10, 8), this.colMat2);
       sh.position.set(s * 7, 30, 0);
       sh.scale.set(1, 0.8, 1);
       g.add(sh);
@@ -1738,7 +1927,7 @@ export class LevelBuilder {
     });
     this.group.add(g);
     // braços de pedra (no mundo, presos aos ombros a cada quadro)
-    const armMat = M.silhouetteFar;
+    const armMat = this.colMat2;
     const veinMat = this.ownMat(new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 0.15, 0.55), fog: false }));
     const segGeo = new THREE.CylinderGeometry(1, 1.25, 1, 8);
     segGeo.translate(0, 0.5, 0);

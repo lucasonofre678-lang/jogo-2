@@ -807,7 +807,24 @@ export class Character {
     const sw = Math.sin(ph);
     const cw = Math.cos(ph);
 
-    if (P.celebrate) {
+    if (P.wake > 0) {
+      // deitado de costas, levantando aos poucos
+      const w = P.wake;
+      const mid = Math.sin(Math.min(1, w) * Math.PI);
+      s.lean = -1.45 * w;
+      s.bodyY = -0.78 * w;
+      s.armL = s.armR = -0.3 * w;
+      s.spreadL = s.spreadR = 0.9 * w + 0.1;
+      s.elbowL = s.elbowR = -0.2 - mid * 1.2;
+      s.legL = -0.1 * w - mid * 0.6;
+      s.legR = 0.05 * w - mid * 0.3;
+      s.kneeL = 0.1 + mid * 1.6;
+      s.kneeR = 0.1 + mid * 0.9;
+      s.headX = -0.6 * w + Math.sin(t * 0.8) * 0.1 * w;
+      s.headY = Math.sin(t * 0.5) * 0.4 * w;
+      s.spineX = mid * 0.5;
+      kPose = 6;
+    } else if (P.celebrate) {
       s.armL = s.armR = -2.75;
       s.spreadL = s.spreadR = 0.45;
       s.elbowL = s.elbowR = -0.25;

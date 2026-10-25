@@ -428,3 +428,34 @@ button.focus, input.focus { outline: 2px solid var(--veil-strong); outline-offse
 .opt-head { margin-top: 12px; font-size: 12px; letter-spacing: 0.25em; text-transform: uppercase; color: var(--veil-strong); text-align: left; }
 .opt-btn.key { font-family: 'Consolas', monospace; }
 .opt-btn.wait { color: #ffd76a; border-color: #ffd76a; }
+
+/* título v1.0 */
+.title-btns { display: flex; flex-direction: column; align-items: center; gap: 12px; margin: 22px 0 10px; }
+.cta.secondary { font-size: 13px; padding: 10px 26px; opacity: 0.8; }
+#version { position: absolute; right: 18px; bottom: 14px; font-size: 12px; letter-spacing: 0.2em; color: var(--muted); }
+.title-controls { margin: 14px auto 0; max-width: 620px; color: var(--muted); font-size: 13px; }
+.title-controls summary { cursor: pointer; letter-spacing: 0.25em; text-transform: uppercase; font-size: 12px; margin-bottom: 12px; }
+#mobile-note { color: #ffb0bd; }
+/* créditos */
+.credits-roll { margin: 18px auto 30px; line-height: 1.5; }
+.credits-roll p { margin: 2px 0; color: #dfe8ff; }
+.credits-roll .cr-head { margin-top: 18px; font-size: 12px; letter-spacing: 0.35em; text-transform: uppercase; color: var(--veil-strong); }
+.credits-roll .cr-name { font-size: 26px; letter-spacing: 0.15em; color: #fff3dc; text-shadow: 0 0 16px rgba(255, 210, 140, 0.6); }
+/* cartão de capítulo */
+#chapter-card { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0; pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0) 70%); }
+#chapter-card.show { animation: chapter 4.2s ease-in-out forwards; }
+@keyframes chapter { 0% { opacity: 0; } 15% { opacity: 1; } 78% { opacity: 1; } 100% { opacity: 0; } }
+.cc-num { font-size: 14px; letter-spacing: 0.6em; text-transform: uppercase; color: var(--veil-strong); }
+.cc-name { font-size: 58px; letter-spacing: 0.2em; color: #f4f8ff; text-shadow: 0 0 30px rgba(110, 170, 255, 0.9); margin: 8px 0; text-align: center; }
+.cc-text { font-size: 17px; font-style: italic; color: #ffe2b0; max-width: 640px; text-align: center; text-shadow: 0 0 8px #000; }
+/* abertura */
+#intro { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 1s; }
+#intro.show { opacity: 1; }
+#intro .bar { position: absolute; left: 0; right: 0; height: 11vh; background: #000; }
+#intro .bar.top { top: 0; }
+#intro .bar.bottom { bottom: 0; }
+#intro-text { position: absolute; left: 0; right: 0; bottom: 15vh; text-align: center; }
+#intro-text p { margin: 8px auto; max-width: 760px; font-size: 21px; font-style: italic; line-height: 1.5; color: #f0f4ff; text-shadow: 0 0 12px #000;
+  opacity: 0; animation: rise 1.4s ease-out forwards; }
+#intro-skip { position: absolute; right: 22px; bottom: calc(11vh + 14px); font-size: 11px; letter-spacing: 0.25em; color: var(--muted); }

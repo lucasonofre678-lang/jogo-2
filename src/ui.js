@@ -9,7 +9,8 @@ import { REBINDABLE, keyName } from './input.js';
 
 const RING_LEN = 2 * Math.PI * 30;
 const MEDALS = ['ouro', 'prata', 'bronze'];
-const SCREENS = ['title', 'select', 'pause', 'finish', 'options', 'wardrobe', 'memories', 'epilogue'];
+const SCREENS = ['title', 'select', 'pause', 'finish', 'options', 'wardrobe', 'memories', 'epilogue', 'credits'];
+export const AUTHOR = 'owrayte';
 
 const CONTROLS = `
   <div class="controls">
@@ -111,10 +112,40 @@ export class UI {
           <h1>VEIL</h1>
           <p class="tagline">Corra. Salte. Costure o Véu.</p>
           <p class="story">${PROLOGUE}</p>
-          ${CONTROLS}
-          <button class="cta" id="start-btn">Jogar</button>
+          <div class="title-btns">
+            <button class="cta" id="continue-btn">Continuar</button>
+            <button class="cta" id="start-btn">Começar a jornada</button>
+            <div class="row-btns">
+              <button class="ghost-btn" id="title-select-btn">Escolher fase</button>
+              <button class="ghost-btn" id="title-options-btn">Opções</button>
+              <button class="ghost-btn" id="credits-btn">Créditos</button>
+            </div>
+          </div>
+          <details class="title-controls"><summary>Controles</summary>${CONTROLS}</details>
+          <p class="small" id="mobile-note">VEIL é feito para teclado e mouse (ou controle). No celular ele não é jogável.</p>
           <p class="small">O mouse fica preso à janela durante o jogo · Esc libera · funciona com controle</p>
         </div>
+        <div id="version"></div>
+      </div>
+
+      <div id="credits" class="screen hidden">
+        <div class="screen-inner">
+          <h2>VEIL</h2>
+          <div class="credits-roll">
+            <p class="cr-head">Criado por</p><p class="cr-name" id="credits-author"></p>
+            <p class="cr-head">Feito com</p><p>Three.js · Vite · WebAudio</p>
+            <p class="cr-head">Arte, música e sons</p><p>Gerados por código: nenhum modelo, textura ou áudio externo</p>
+            <p class="cr-head">Obrigado por jogar</p><p>e por costurar o Véu.</p>
+          </div>
+          <button class="cta" id="credits-back">Voltar</button>
+        </div>
+      </div>
+
+      <div id="chapter-card"><div class="cc-num"></div><div class="cc-name"></div><div class="cc-text"></div></div>
+      <div id="intro">
+        <div class="bar top"></div><div class="bar bottom"></div>
+        <div id="intro-text"></div>
+        <div id="intro-skip">Espaço / Enter / A — pular</div>
       </div>
 
       <div id="select" class="screen hidden">
@@ -269,6 +300,41 @@ export class UI {
     this.current = name;
     this.focusIndex = 0;
     this.updateFocus(false);
+  }
+
+  // Título: botão Continuar (próxima fase), versão e aviso no celular.
+  setupTitle(version, nextName, hasProgress) {
+    this.$('version').textContent = 'v' + version;
+    this.$('credits-author').textContent = AUTHOR;
+    const cont = this.$('continue-btn');
+    cont.style.display = hasProgress ? '' : 'none';
+    cont.textContent = nextName ? `Continuar — ${nextName}` : 'Continuar';
+    this.$('start-btn').textContent = hasProgress ? 'Rever a abertura' : 'Começar a jornada';
+    this.$('start-btn').classList.toggle('secondary', hasProgress);
+    const touchOnly = 'ontouchstart' in window && !window.matchMedia('(pointer: fine)').matches;
+    this.$('mobile-note').style.display = touchOnly ? '' : 'none';
+  }
+
+  // Cartão grande de capítulo.
+  chapterCard(ch) {
+    const el = this.$('chapter-card');
+    el.querySelector('.cc-num').textContent = `Capítulo ${ch.num}`;
+    el.querySelector('.cc-name').textContent = ch.name;
+    el.querySelector('.cc-text').textContent = ch.text;
+    el.classList.remove('show');
+    void el.offsetWidth;
+    el.classList.add('show');
+  }
+
+  // Abertura: barras de cinema e o prólogo linha a linha.
+  showIntro(lines) {
+    const el = this.$('intro');
+    this.$('intro-text').innerHTML = lines.map((t, i) => `<p style="animation-delay:${0.8 + i * 2.6}s">${t}</p>`).join('');
+    el.classList.add('show');
+  }
+
+  hideIntro() {
+    this.$('intro').classList.remove('show');
   }
 
   // ------------------------------------------------------------ navegação

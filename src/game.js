@@ -19,7 +19,7 @@ import { Input } from './input.js';
 import { AudioSystem } from './audio.js';
 import { loadSettings, saveSettings } from './settings.js';
 import { SKINS, skinById, skinUnlocked } from './skins.js';
-import { LORE } from './lore.js';
+import { LORE, CHAPTERS, PROLOGUE_LINES } from './lore.js';
 import { Recorder, GhostRunner, Shadow, saveGhost, loadGhost } from './echo.js';
 
 // relógio simples por quadro (o THREE.Clock está obsoleto)
@@ -45,7 +45,7 @@ const RING_COLOR = new THREE.Color(2, 1.5, 0.4);
 const FRAG_COLOR = new THREE.Color(2.2, 1.7, 0.8);
 const VIOLET = new THREE.Color(1.4, 0.5, 2.6);
 const MUSIC_BY_CHAPTER = ['run', 'run', 'run', 'veu', 'final', 'veu'];
-const MENU_STATES = new Set(['title', 'select', 'options', 'wardrobe', 'memories', 'epilogue']);
+const MENU_STATES = new Set(['title', 'select', 'options', 'wardrobe', 'memories', 'epilogue', 'credits', 'intro']);
 
 function freshProgress() {
   return { best: {}, fragments: {}, feats: {}, skin: 'andarilho', speedrunBest: null, unlockAll: false };
@@ -62,7 +62,8 @@ function loadProgress() {
 }
 
 export class Game {
-  constructor(container) {
+  constructor(container, version = 'dev') {
+    this.version = version;
     const s = createScene(container);
     this.renderer = s.renderer;
     this.scene = s.scene;
@@ -117,8 +118,7 @@ export class Game {
     this.applySettings();
     this.wireEvents();
     this.loadLevel(0, true);
-    this.setState('title');
-    this.ui.showScreen('title');
+    this.openTitle();
 
     this.clock = new FrameClock();
     this.frame = this.frame.bind(this);
@@ -140,6 +140,9 @@ export class Game {
       if (q.get('anim')) this.demo = q.get('anim');
       if (q.get('pos')) this.respawn(new THREE.Vector3(...q.get('pos').split(',').map(Number)), 0);
       if (q.get('dim')) this.tryShift();
+      // ?ff=segundos: avança a simulação (para fotos de ações no meio)
+      const ff = Number(q.get('ff') ?? 0);
+      for (let t = 0; t < ff; t += 1 / 60) this.tick(1 / 60);
     }
   }
 
@@ -251,10 +254,19 @@ export class Game {
     };
 
     const ui = this.ui;
-    ui.on('start-btn', () => this.openSelect());
-    ui.titleEl.addEventListener('click', () => {
-      if (this.state === 'title') this.openSelect();
+    ui.on('start-btn', () => this.startIntro());
+    ui.on('continue-btn', () => this.continueGame());
+    ui.on('title-select-btn', () => this.openSelect());
+    ui.on('title-options-btn', () => this.openOptions('title'));
+    ui.on('credits-btn', () => this.openCredits());
+    ui.on('credits-back', () => (this.creditsReturn === 'finish' ? this.closeCredits() : this.openTitle()));
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && (this.state === 'playing' || this.state === 'dead')) {
+        this.input.unlock();
+        this.pause();
+      }
     });
+
     ui.on('select-back', () => this.openTitle());
     ui.on('speedrun-btn', () => this.startSpeedrun());
     ui.on('wardrobe-btn', () => this.openWardrobe());
@@ -329,7 +341,11 @@ export class Game {
     this.ui.setFragment(!!this.level.fragment, this.progress.fragments[def.id]);
     this.stats.deaths = 0;
     this.restartLevel();
-    if (!silent) {
+    if (!silent && this.pendingChapter) {
+      this.audio.startMusic(def.music ?? MUSIC_BY_CHAPTER[def.chapter ?? 0]);
+      this.ui.chapterCard(this.pendingChapter);
+      this.pendingChapter = null;
+    } else if (!silent) {
       this.audio.startMusic(def.music ?? MUSIC_BY_CHAPTER[def.chapter ?? 0]);
       this.ui.splash(`TRAVESSIA ${index + 1}`, def.name, def.subtitle, LORE[def.id]?.intro);
     }
@@ -427,7 +443,75 @@ export class Game {
   openTitle() {
     this.menuReady();
     this.setState('title');
+    const next = this.nextLevelIndex();
+    this.ui.setupTitle(this.version, next !== null ? this.levels[next].name : null, Object.keys(this.progress.best).length > 0);
     this.ui.showScreen('title');
+  }
+
+  // Primeira fase ainda não concluída (ou null se terminou todas).
+  nextLevelIndex() {
+    const i = this.levels.findIndex((d) => this.progress.best[d.id] === undefined);
+    return i < 0 ? null : i;
+  }
+
+  continueGame() {
+    const i = this.nextLevelIndex();
+    if (i === null) this.openSelect();
+    else this.playLevel(i);
+  }
+
+  openCredits(from = 'title') {
+    this.creditsReturn = from;
+    if (from === 'title') this.menuReady();
+    this.setState('credits');
+    this.ui.showScreen('credits');
+  }
+
+  closeCredits() {
+    this.setState('finish');
+    this.ui.showFinish(...this.finishArgs);
+  }
+
+  // Abertura: o andarilho acorda enquanto o prólogo aparece.
+  startIntro() {
+    this.audio.init();
+    document.activeElement?.blur?.();
+    this.loadLevel(0, true);
+    this.audio.startMusic('calm');
+    this.setState('intro');
+    this.ui.showScreen(null);
+    this.ui.hud.classList.add('hidden');
+    this.ui.showIntro(PROLOGUE_LINES);
+    this.player.wake = 1;
+    this.introAngle = this.player.facing + 2.2;
+  }
+
+  updateIntro(dt, realDt) {
+    const p = this.player;
+    const t = this.stateTime;
+    const skip = this.input.wasPressed('Space') || this.input.wasPressed('Enter') || this.input.padPressed.has(0) || this.input.wasPressed('Escape');
+    const END = 11.5;
+    if (skip && t < END - 1.6) this.stateTime = END - 1.6;
+    if (t > END - 2.2) p.wake = Math.max(0, p.wake - realDt / 1.6);
+    this.level.update(dt, this.time);
+    p.vel.set(0, 0, 0);
+    p.grounded = true;
+    p.animate(dt);
+    // câmera: começa no alto e desce em volta do andarilho
+    const k = Math.min(1, t / END);
+    const ang = this.introAngle + k * 1.6;
+    const dist = 9 - k * 4.5;
+    const pp = p.pos;
+    this.tmp.set(pp.x + Math.sin(ang) * dist, pp.y + 7 - k * 5.2, pp.z + Math.cos(ang) * dist);
+    this.tmp2.set(pp.x, pp.y + 0.6 + k * 0.7, pp.z);
+    this.cam.cinematic(this.tmp, this.tmp2, dt, 1.4);
+    if (t > END) {
+      p.wake = 0;
+      this.ui.hideIntro();
+      this.progress.introSeen = true;
+      this.saveProgress();
+      this.playLevel(0);
+    }
   }
 
   openSelect() {
@@ -507,7 +591,7 @@ export class Game {
 
   openOptions(from) {
     this.optionsReturn = from;
-    if (from === 'select') this.menuReady();
+    if (from !== 'pause') this.menuReady();
     this.setState('options');
     this.ui.buildOptions(this.settings, (key, v) => {
       this.settings[key] = v;
@@ -532,6 +616,8 @@ export class Game {
     if (this.optionsReturn === 'pause') {
       this.setState('paused');
       this.ui.showPause(this.levelDef);
+    } else if (this.optionsReturn === 'title') {
+      this.openTitle();
     } else {
       this.openSelect();
     }
@@ -539,6 +625,9 @@ export class Game {
 
   playLevel(i) {
     this.audio.init();
+    const def = this.levels[i];
+    const first = this.levels.findIndex((d) => (d.chapter ?? 0) === (def.chapter ?? 0)) === i;
+    if (first && !this.speedrun) this.pendingChapter = CHAPTERS[def.chapter ?? 0];
     document.activeElement?.blur?.();
     this.player.celebrate = false;
     this.loadLevel(i);
@@ -769,8 +858,7 @@ export class Game {
 
   closeEpilogue() {
     if (this.state !== 'epilogue') return;
-    this.setState('finish');
-    this.ui.showFinish(...this.finishArgs);
+    this.openCredits('finish');
   }
 
   formatShort(t) {
@@ -823,6 +911,11 @@ export class Game {
       case 'srnext': this.updateFinish(dt); break;
       case 'paused': this.handleMenuInput(realDt); break;
       case 'epilogue': this.updateFinish(dt); break;
+      case 'intro': this.updateIntro(dt, realDt); break;
+      case 'credits':
+        if (this.creditsReturn === 'finish') this.updateFinish(dt);
+        else this.updateMenu(dt, realDt);
+        break;
       default:
         // opções abertas da pausa: o mundo continua congelado
         if (this.state === 'options' && this.optionsReturn === 'pause') {
@@ -893,7 +986,11 @@ export class Game {
 
   menuConfirm() {
     switch (this.state) {
-      case 'title': this.openSelect(); break;
+      case 'title':
+        if (Object.keys(this.progress.best).length) this.continueGame();
+        else this.startIntro();
+        break;
+      case 'credits': this.creditsReturn === 'finish' ? this.closeCredits() : this.openTitle(); break;
       case 'finish': this.nextLevel(); break;
       case 'paused': this.resume(); break;
       case 'epilogue': this.closeEpilogue(); break;
@@ -904,6 +1001,7 @@ export class Game {
   menuBack() {
     switch (this.state) {
       case 'select': this.openTitle(); break;
+      case 'credits': this.creditsReturn === 'finish' ? this.closeCredits() : this.openTitle(); break;
       case 'options': this.closeOptions(); break;
       case 'wardrobe':
       case 'memories': this.openSelect(); break;
