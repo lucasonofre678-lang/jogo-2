@@ -22,6 +22,20 @@ import { SKINS, skinById, skinUnlocked } from './skins.js';
 import { LORE } from './lore.js';
 import { Recorder, GhostRunner, Shadow, saveGhost, loadGhost } from './echo.js';
 
+// relógio simples por quadro (o THREE.Clock está obsoleto)
+class FrameClock {
+  constructor() {
+    this.last = performance.now();
+  }
+
+  getDelta() {
+    const now = performance.now();
+    const d = (now - this.last) / 1000;
+    this.last = now;
+    return d;
+  }
+}
+
 const BLOOM_STRENGTH = 0.8;
 const STATE_RANK = { patrol: 0, return: 0, suspicious: 1, chase: 2 };
 const SAVE_KEY = 'veil.progress.v2';
@@ -72,14 +86,14 @@ export class Game {
     this.ui = new UI();
     this.input = new Input(this.renderer.domElement);
     this.recorder = new Recorder();
-    this.ghost = new GhostRunner(this.scene, this.player);
-    this.shadow = new Shadow(this.scene, this.player);
+    this.ghost = new GhostRunner(this.scene, this.world);
+    this.shadow = new Shadow(this.scene, this.world);
     this.guardians = [];
     this.level = null;
     this.levels = LEVELS;
     this.progress = loadProgress();
     this.settings = loadSettings();
-    this.player.setSkin(skinById(this.progress.skin));
+    this.wearSkin(skinById(this.progress.skin));
 
     this.state = 'title';
     this.time = 0;
@@ -106,7 +120,7 @@ export class Game {
     this.setState('title');
     this.ui.showScreen('title');
 
-    this.clock = new THREE.Clock();
+    this.clock = new FrameClock();
     this.frame = this.frame.bind(this);
     requestAnimationFrame(this.frame);
 
@@ -122,11 +136,18 @@ export class Game {
       else if (scr === 'memories') this.openMemories();
       else if (scr === 'options') this.openOptions('select');
       if (q.get('run')) this.input.down.add('KeyW');
-      if (q.get('skin')) this.player.setSkin(skinById(q.get('skin')));
+      if (q.get('skin')) this.wearSkin(skinById(q.get('skin')));
       if (q.get('anim')) this.demo = q.get('anim');
       if (q.get('pos')) this.respawn(new THREE.Vector3(...q.get('pos').split(',').map(Number)), 0);
       if (q.get('dim')) this.tryShift();
     }
+  }
+
+  // Veste o manto no jogador e nos ecos (fantasma e Sombra copiam a forma).
+  wearSkin(skin) {
+    this.player.setSkin(skin);
+    this.ghost?.setSkin(skin);
+    this.shadow?.setSkin(skin);
   }
 
   get levelDef() {
@@ -395,7 +416,7 @@ export class Game {
     this.ui.drawSpeedLines(0, 0);
     this.ui.setDanger(0);
     this.shadow.stop();
-    this.ghost.fig.visible = false;
+    this.ghost.fig.setVisible(false);
     this.player.celebrate = false;
     if (this.state === 'paused' || this.state === 'finish' || this.state === 'playing' || this.state === 'srnext') {
       // volta o cenário do menu para o começo da fase
@@ -422,7 +443,7 @@ export class Game {
     const build = () => this.ui.buildWardrobe(this.progress, this.levels, this.progress.skin, (id) => {
       this.progress.skin = id;
       this.saveProgress();
-      this.player.setSkin(skinById(id));
+      this.wearSkin(skinById(id));
       this.effects.sparks(this.player.pos.x, this.player.pos.y + 1, this.player.pos.z, 40, { speed: 3, life: 0.8 });
       this.audio.menu();
       build();
@@ -501,7 +522,7 @@ export class Game {
         /* ignorado */
       }
       this.progress = freshProgress();
-      this.player.setSkin(skinById('andarilho'));
+      this.wearSkin(skinById('andarilho'));
       this.ghost.clear();
     }, this.input);
     this.ui.showScreen('options');

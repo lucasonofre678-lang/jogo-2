@@ -1495,8 +1495,13 @@ export class LevelBuilder {
     b.warnFill.material.opacity = 0;
     b.arm.visible = false;
     b.armC.enabled = false;
-    b.col.g.position.y = b.col.baseY;
+    b.col.sink = 0;
+    b.col.damage = 0;
     b.col.g.rotation.x = 0;
+    for (const a of b.col.arms) {
+      a.hold = null;
+      a.hideHand = false;
+    }
     if (this.goal) {
       this.goal.locked = true;
       this.goal.group.visible = false;
@@ -1504,9 +1509,15 @@ export class LevelBuilder {
   }
 
   placeFist(x, y, z) {
-    const c = this.boss.fistC;
+    const b = this.boss;
+    const c = b.fistC;
     c.translate(x - 2.1 - c.minX, y - c.minY, z - 2.1 - c.minZ);
-    this.boss.fist.position.set(x, y + 1.2, z);
+    b.fist.position.set(x, y + 1.2, z);
+    // a mão direita do Colosso segura o punho de pedra
+    const arm = b.col.arms[1];
+    arm.hold ??= new THREE.Vector3();
+    arm.hold.set(x, y + 3.2, z - 1.5);
+    arm.hideHand = true;
   }
 
   placeArm(z, y0, y1) {
@@ -1516,6 +1527,10 @@ export class LevelBuilder {
     c.maxY = y1;
     b.arm.position.set((b.arena[0] + b.arena[2]) / 2, (y0 + y1) / 2, z);
     b.arm.scale.y = y1 - y0;
+    // a mão esquerda arrasta a lâmina pela arena
+    const arm = b.col.arms[0];
+    arm.hold ??= new THREE.Vector3();
+    arm.hold.set(b.arena[0] - 3, (y0 + y1) / 2 + 1, z);
   }
 
   updateBoss(dt) {
@@ -1526,6 +1541,8 @@ export class LevelBuilder {
       b.lit = lit;
       this.onBossEvent?.('hit', b.lit, b.runes.length);
       b.col.g.rotation.x = -0.15;
+      b.col.damage = lit;
+      b.col.flinch = 1;
       if (lit >= b.runes.length && !b.defeated) {
         b.defeated = true;
         b.fistC.enabled = false;
@@ -1544,8 +1561,12 @@ export class LevelBuilder {
     if (b.defeated) {
       // o Colosso afunda no abismo
       b.deadT += dt;
-      b.col.g.position.y = b.col.baseY - b.deadT * b.deadT * 3;
+      b.col.sink = b.deadT * b.deadT * 3;
       b.col.g.rotation.x = Math.min(0.5, b.deadT * 0.15);
+      for (const a of b.col.arms) {
+        a.hold = null;
+        a.hideHand = false;
+      }
       if (b.fist.visible) {
         b.fist.position.y -= dt * 20;
         if (b.fist.position.y < b.y - 30) b.fist.visible = false;
@@ -1611,6 +1632,8 @@ export class LevelBuilder {
             b.landed = false;
             b.fistC.enabled = false;
             b.fist.visible = false;
+            b.col.arms[1].hold = null;
+            b.col.arms[1].hideHand = false;
             b.state = 'wait';
             b.t = 0;
           }
@@ -1631,6 +1654,7 @@ export class LevelBuilder {
         } else {
           b.arm.visible = false;
           b.armC.enabled = false;
+          b.col.arms[0].hold = null;
           b.state = 'wait';
           b.t = 0;
         }
@@ -1713,8 +1737,92 @@ export class LevelBuilder {
       if (o.isMesh) o.castShadow = false;
     });
     this.group.add(g);
-    this.colossus = { g, head, eyeMat, light, baseY: y };
+    // braços de pedra (no mundo, presos aos ombros a cada quadro)
+    const armMat = M.silhouetteFar;
+    const veinMat = this.ownMat(new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 0.15, 0.55), fog: false }));
+    const segGeo = new THREE.CylinderGeometry(1, 1.25, 1, 8);
+    segGeo.translate(0, 0.5, 0);
+    const makeArm = (side) => {
+      const upper = new THREE.Mesh(segGeo, armMat);
+      const fore = new THREE.Mesh(segGeo, armMat);
+      const vein = new THREE.Mesh(new THREE.BoxGeometry(0.25, 1, 0.25), veinMat);
+      vein.geometry.translate(0, 0.5, 0);
+      const hand = new THREE.Mesh(new THREE.DodecahedronGeometry(2.6 * scale, 0), armMat);
+      const elbowBall = new THREE.Mesh(new THREE.SphereGeometry(1.5 * scale, 8, 6), armMat);
+      for (const m of [upper, fore, vein, hand, elbowBall]) {
+        m.userData.dynamic = true;
+        m.frustumCulled = false;
+        this.group.add(m);
+      }
+      return {
+        side, upper, fore, vein, hand, elbowBall, len: 40 * scale / 1.7,
+        shoulder: new THREE.Vector3(side * 7, 30, 0), target: new THREE.Vector3(), cur: new THREE.Vector3(), hold: null, init: false,
+      };
+    };
+    // rachaduras no peito: acendem a cada runa
+    const cracks = [];
+    for (let i = 0; i < 3; i++) {
+      const c = new THREE.Mesh(new THREE.BoxGeometry(0.35, 5 - i, 0.3), veinMat);
+      c.position.set(-2.5 + i * 2.5, 29 + (i % 2), 6.6 - Math.abs(i - 1) * 0.6);
+      c.rotation.z = (i - 1) * 0.5;
+      c.visible = false;
+      c.userData.dynamic = true;
+      g.add(c);
+      cracks.push(c);
+    }
+    this.colossus = { g, head, eyeMat, light, baseY: y, scale, arms: [makeArm(-1), makeArm(1)], cracks, damage: 0, sink: 0, flinch: 0 };
     return this.colossus;
+  }
+
+  // Cinemática inversa de dois ossos: ombro → cotovelo → mão.
+  updateColossusArms(dt, time) {
+    const col = this.colossus;
+    col.g.updateMatrixWorld(true);
+    const up = new THREE.Vector3(0, 1, 0);
+    const tmpQ = new THREE.Quaternion();
+    for (const a of col.arms) {
+      const sh = this.tmp.copy(a.shoulder).applyMatrix4(col.g.matrixWorld);
+      const shoulder = sh.clone();
+      if (a.hold) {
+        a.target.copy(a.hold);
+      } else {
+        // descanso: mãos ao lado do corpo, balançando devagar
+        a.target.set(a.side * 10, 12 + Math.sin(time * 0.7 + a.side) * 1.5, 7).multiplyScalar(col.scale).applyMatrix4(col.g.matrixWorld);
+      }
+      if (!a.init) {
+        a.cur.copy(a.target);
+        a.init = true;
+      }
+      if (a.hold) a.cur.copy(a.target);
+      else a.cur.lerp(a.target, 1 - Math.exp(-3 * dt));
+      const hand = a.cur;
+      const d = hand.clone().sub(shoulder);
+      const len = d.length();
+      const reach = Math.min(len, a.len * 1.98);
+      const dir = d.clone().normalize();
+      // o cotovelo dobra para fora e para cima
+      const bend = new THREE.Vector3(a.side, 0.8, 0).normalize();
+      bend.addScaledVector(dir, -bend.dot(dir)).normalize();
+      const half = reach / 2;
+      const h = Math.sqrt(Math.max(0, a.len * a.len - half * half));
+      const elbow = shoulder.clone().addScaledVector(dir, half).addScaledVector(bend, h);
+      const handPos = shoulder.clone().addScaledVector(dir, reach);
+      const place = (m, from, to, r) => {
+        const seg = to.clone().sub(from);
+        const L = seg.length();
+        m.position.copy(from);
+        tmpQ.setFromUnitVectors(up, seg.normalize());
+        m.quaternion.copy(tmpQ);
+        m.scale.set(r, L, r);
+      };
+      place(a.upper, shoulder, elbow, 2.2 * col.scale);
+      place(a.fore, elbow, handPos, 1.8 * col.scale);
+      place(a.vein, elbow, handPos, 1.1 * col.scale);
+      a.elbowBall.position.copy(elbow);
+      a.hand.position.copy(handPos);
+      a.hand.visible = !a.hideHand;
+      a.hand.rotation.set(time * 0.1, a.side, 0);
+    }
   }
 
   resetMechanics() {
@@ -1842,10 +1950,15 @@ export class LevelBuilder {
         const want = Math.atan2(pl.pos.x - hp.x, pl.pos.z - hp.z);
         col.head.rotation.y += (THREE.MathUtils.clamp(want, -0.8, 0.8) - col.head.rotation.y) * (1 - Math.exp(-2 * dt));
       }
-      const k = 1 + Math.sin(time * 2.5) * 0.25;
+      const life = 1 - col.damage * 0.28;
+      const k = (1 + Math.sin(time * 2.5) * 0.25) * Math.max(0, life);
       col.eyeMat.color.setRGB(3 * k, 0.4 * k, 1.1 * k);
       col.light.intensity = 40 * k;
-      col.g.position.y = col.baseY + Math.sin(time * 0.9) * 0.4;
+      col.flinch = Math.max(0, col.flinch - dt * 1.5);
+      col.head.rotation.z = Math.sin(time * 30) * col.flinch * 0.15;
+      col.g.position.y = col.baseY + Math.sin(time * 0.9) * 0.4 - col.sink;
+      for (let i = 0; i < col.cracks.length; i++) col.cracks[i].visible = i < col.damage;
+      this.updateColossusArms(dt, time);
     }
   }
 

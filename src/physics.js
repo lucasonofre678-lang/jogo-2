@@ -146,6 +146,34 @@ export class Ramp {
     if (d >= r || d < -1.2) return null;
     return { nx: gx / L, ny: 1 / L, nz: gz / L, depth: r - d };
   }
+
+  // Jogador (cilindro: pés em y) dentro do prisma, longe da face de cima:
+  // empurra pela saída mais curta (pontas ou por baixo).
+  insidePush(x, y, z, r, h) {
+    if (z < this.zmin - r || z > this.zmax + r) return null;
+    const ax = Math.abs(x - this.x0);
+    if (ax > this.w) return null;
+    const ridge = this.ridgeAt(Math.min(this.zmax, Math.max(this.zmin, z)));
+    const top = ridge - this.c * ax;
+    const base = ridge - this.H;
+    if (y > top - 0.5 || y + h < base) return null;
+    const outFront = z - (this.zmin - r);
+    const outBack = this.zmax + r - z;
+    const outBelow = y + h - base;
+    const m = Math.min(outFront, outBack, outBelow);
+    if (m === outBelow) return { nx: 0, ny: -1, nz: 0, depth: outBelow, solid: true };
+    if (m === outFront) return { nx: 0, ny: 0, nz: -1, depth: outFront, solid: true };
+    return { nx: 0, ny: 0, nz: 1, depth: outBack, solid: true };
+  }
+
+  // O ponto está dentro do prisma?
+  containsPoint(x, y, z) {
+    if (z < this.zmin || z > this.zmax) return false;
+    const ax = Math.abs(x - this.x0);
+    if (ax > this.w) return false;
+    const ridge = this.ridgeAt(z);
+    return y < ridge - this.c * ax && y > ridge - this.H;
+  }
 }
 
 export class PhysicsWorld {
@@ -157,6 +185,18 @@ export class PhysicsWorld {
   clear() {
     this.colliders.length = 0;
     this.ramps.length = 0;
+  }
+
+  // Primeira distância em que o raio entra numa rampa (marcha em passos curtos).
+  raycastRamps(ox, oy, oz, dx, dy, dz, maxDist) {
+    if (!this.ramps.length) return null;
+    for (let t = 0.2; t <= maxDist; t += 0.25) {
+      const x = ox + dx * t;
+      const y = oy + dy * t;
+      const z = oz + dz * t;
+      for (const r of this.ramps) if (r.enabled && r.containsPoint(x, y, z)) return t;
+    }
+    return null;
   }
 
   addRamp(def) {

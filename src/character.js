@@ -7,6 +7,7 @@
 // A física fica em player.js; aqui só se lê o estado do jogador.
 import * as THREE from 'three';
 import { softTexture } from './materials.js';
+import { SKINS } from './skins.js';
 
 const TAU = Math.PI * 2;
 const BODY_PIVOT = 0.9; // centro de massa: cambalhotas e inclinações giram aqui
@@ -387,8 +388,11 @@ function capePattern(pattern) {
 
 // ===================================================================== modelo
 export class Character {
-  constructor(scene) {
+  // opts.ghost = { body, accent, eye }: troca todos os materiais (fantasma,
+  // Sombra); opts.light = false tira a luz própria.
+  constructor(scene, opts = {}) {
     this.scene = scene;
+    this.opts = opts;
     this.time = 0;
     this.airTime = 0;
     this.idleTime = 0;
@@ -402,6 +406,8 @@ export class Character {
     this.side = new THREE.Vector3();
     this.colliders = { spheres: [], capsules: [] };
     this.build(scene);
+    this.setSkin(SKINS[0]);
+    if (opts.ghost) this.applyGhost(opts.ghost);
   }
 
   build(scene) {
@@ -616,7 +622,7 @@ export class Character {
     // luz de preenchimento própria: o andarilho fica legível em qualquer cenário
     this.fill = new THREE.PointLight(0xbcd2ff, 4.5, 5, 1.6);
     this.fill.position.set(0.8, 2.3, 1.6);
-    root.add(this.fill);
+    if (this.opts.light !== false) root.add(this.fill);
     Object.assign(this, { root, body, hips, spine, neck, head });
     for (const n of ['hips', 'spine', 'neck', 'head', 'legL', 'legR', 'kneeL', 'kneeR', 'armL', 'armR', 'elbowL', 'elbowR']) this[n].name = n;
     scene.add(root);
@@ -668,6 +674,22 @@ export class Character {
     scene.add(this.blob);
     this.blobMat = blobMat;
     this.trailColor = new THREE.Color();
+  }
+
+  // Fantasmas: um material para o corpo, um para os detalhes e um para os olhos.
+  applyGhost({ body, accent, eye }) {
+    const swap = (o) => {
+      if (!o.isMesh) return;
+      o.castShadow = false;
+      o.receiveShadow = false;
+      if (o.material === this.eyeMat) o.material = eye;
+      else if (o.material === this.trimMat) o.material = accent;
+      else o.material = body;
+    };
+    this.root.traverse(swap);
+    for (const c of this.cloth) swap(c.mesh);
+    this.blob.visible = false;
+    this.trailMat.opacity = 0.5;
   }
 
   // ------------------------------------------------------------ manto
@@ -1070,7 +1092,7 @@ export class Character {
     const ground = world.groundBelow(P.pos.x, P.pos.z, 0.05, P.pos.y + 0.05, 40);
     if (ground !== null) {
       const hgt = P.pos.y - ground;
-      this.blob.visible = this.root.visible;
+      this.blob.visible = this.root.visible && !this.opts.ghost;
       this.blob.position.set(P.pos.x, ground + 0.03, P.pos.z);
       const sc = 0.9 + Math.min(hgt, 8) * 0.06;
       this.blob.scale.set(sc, sc, sc);

@@ -112,7 +112,9 @@ export class CameraController {
       const want = this.distance + speedK * 1.6;
       // Barreiras do Véu também seguram a câmera (atravessá-las ofusca a visão).
       const hit = this.world.raycast(this.focus.x, fy, this.focus.z, this.dir.x, this.dir.y, this.dir.z, want + 0.3, ALL);
-      const wanted = hit ? Math.max(0.7, hit.t - 0.3) : want;
+      const rampT = this.world.raycastRamps(this.focus.x, fy, this.focus.z, this.dir.x, this.dir.y, this.dir.z, want + 0.3);
+      const t = Math.min(hit ? hit.t : Infinity, rampT ?? Infinity);
+      const wanted = isFinite(t) ? Math.max(0.7, t - 0.3) : want;
       if (wanted < this.currentDist) this.currentDist = wanted;
       else this.currentDist += (wanted - this.currentDist) * (1 - Math.exp(-3.5 * dt));
       cam.position.set(

@@ -61,7 +61,13 @@ const WIND_MAX_UP = 13;
 const ROLL_IMPACT = 17;
 
 // surf: rampas íngremes sem atrito; segure contra a rampa para não cair
-export const SURF_MAX = 42;
+export const SURF_MAX = 50;
+// "air strafe" (como no CS): logo depois de surfar, virar o mouse segurando
+// A/D no ar ganha velocidade. Cada quadro só soma até SURF_WISH na direção
+// pedida; perpendicular à velocidade, isso faz o vetor crescer.
+const SURF_AIR_TIME = 1.4;
+const SURF_WISH = 2.4;
+const SURF_AIR_ACCEL = 140;
 const SURF_JUMP = 7.5;
 const SURF_ACCEL = 45; // controle forte contra a rampa (como o airaccelerate alto dos servidores de surf)
 const SURF_GRAVITY = 0.55; // fração da gravidade enquanto surfa
@@ -409,20 +415,36 @@ export class Player {
           az += into * this.wallNz;
         }
       }
+      const surfAir = !this.surfing && this.surfTimer > -SURF_AIR_TIME && this.airSpeedCap > RUN;
       const acc = this.surfing ? SURF_ACCEL : AIR_ACCEL;
       this.vel.x += ax * acc * dt;
       this.vel.z += az * acc * dt;
-      if (moveLen < 0.05 && !this.surfing) {
+      if (moveLen < 0.05 && !this.surfing && !surfAir) {
         const k = Math.max(0, 1 - AIR_IDLE_DRAG * dt);
         this.vel.x *= k;
         this.vel.z *= k;
       }
       if (this.surfing) this.airSpeedCap = Math.min(SURF_MAX, Math.max(this.airSpeedCap, this.horizontalSpeed));
-      const cap = Math.min(this.surfing ? SURF_MAX : MAX_AIR_SPEED, Math.max(speed, this.airSpeedCap));
+      const cap = Math.min(this.surfing || surfAir ? SURF_MAX : MAX_AIR_SPEED, Math.max(speed, this.airSpeedCap));
       const hs = Math.hypot(this.vel.x, this.vel.z);
       if (hs > cap) {
         this.vel.x *= cap / hs;
         this.vel.z *= cap / hs;
+      }
+      if (surfAir) {
+        // ganho do strafe: só soma na direção pedida até SURF_WISH
+        const al = Math.hypot(ax, az);
+        if (al > 0.05) {
+          const wx = ax / al;
+          const wz = az / al;
+          const add = SURF_WISH * al - (this.vel.x * wx + this.vel.z * wz);
+          if (add > 0) {
+            const a = Math.min(SURF_AIR_ACCEL * dt, add);
+            this.vel.x += wx * a;
+            this.vel.z += wz * a;
+          }
+        }
+        this.airSpeedCap = Math.min(SURF_MAX, Math.max(this.airSpeedCap, this.horizontalSpeed));
       }
     }
     this.applyWind(dt);
@@ -839,8 +861,21 @@ export class Player {
     const cy = this.pos.y + r;
     for (const ramp of this.world.ramps) {
       if (!ramp.enabled) continue;
-      const hit = ramp.contact(this.pos.x, cy, this.pos.z, r);
+      const hit = ramp.contact(this.pos.x, cy, this.pos.z, r) ?? ramp.insidePush(this.pos.x, this.pos.y, this.pos.z, RADIUS, this.height);
       if (!hit) continue;
+      if (hit.solid) {
+        // bateu na ponta ou por baixo: só sai, sem surfar
+        this.pos.x += hit.nx * hit.depth;
+        this.pos.y += hit.ny * hit.depth;
+        this.pos.z += hit.nz * hit.depth;
+        const vin = this.vel.x * hit.nx + this.vel.y * hit.ny + this.vel.z * hit.nz;
+        if (vin < 0) {
+          this.vel.x -= hit.nx * vin;
+          this.vel.y -= hit.ny * vin;
+          this.vel.z -= hit.nz * vin;
+        }
+        continue;
+      }
       this.pos.x += hit.nx * hit.depth;
       this.pos.y += hit.ny * hit.depth;
       this.pos.z += hit.nz * hit.depth;
