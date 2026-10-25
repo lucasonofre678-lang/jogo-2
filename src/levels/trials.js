@@ -70,10 +70,10 @@ export function labirinto(b) {
   b.memory(0, 4.1, -47.5);
   // pontes que respiram sobre o vão
   b.phasePlatform(-2, -67, 2, -63, 0, { period: 2, phase: 0, on: 0.62 });
-  b.phasePlatform(-2, -75, 2, -71, 0, { period: 2, phase: 0.45, on: 0.62 });
-  b.platform(-3, -112, 3, -79, 0);
-  b.block(-3.6, 0, -112, -3, 4.5, -79, M.wall);
-  b.block(3, 0, -112, 3.6, 4.5, -79, M.wall);
+  b.phasePlatform(-2, -74, 2, -70, 0, { period: 2, phase: 0.7, on: 0.62 });
+  b.platform(-3, -112, 3, -77, 0);
+  b.block(-3.6, 0, -112, -3, 4.5, -77, M.wall);
+  b.block(3, 0, -112, 3.6, 4.5, -77, M.wall);
   // 4: corrida contra o portão
   b.rune(0, 1.3, -84, 'g4', 3.4);
   b.lowBar(-3, 3, 0, -93);

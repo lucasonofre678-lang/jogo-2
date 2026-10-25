@@ -1,4 +1,6 @@
-# VEIL
+# VEIL  ·  v1.0
+
+![VEIL](press/04-colosso.png)
 
 Parkour místico em terceira pessoa. Um andarilho encapuzado acorda nas ruínas
 da Abadia Submersa, sem memória, e atravessa 27 fases em 6 capítulos para
@@ -7,6 +9,9 @@ costurar o Véu que ele mesmo rasgou.
 Feito com **Three.js + Vite**, sem modelos, texturas ou sons externos: toda a
 geometria, os materiais (texturas desenhadas em canvas) e o áudio (WebAudio)
 são gerados por código.
+
+Para publicar (itch.io / GitHub Pages) veja [PUBLICAR.md](PUBLICAR.md); as novidades estão em
+[CHANGELOG.md](CHANGELOG.md) e as imagens de divulgação em [press/](press/).
 
 ## Como rodar
 
@@ -149,4 +154,4 @@ src/
 ```
 
 Em modo de desenvolvimento há atalhos pela URL: `?play=<id da fase>`,
-`?screen=select|wardrobe|memories|options`, `?skin=<id>`, `?anim=<pose>`, `?pos=x,y,z`.
+`?screen=select|wardrobe|memories|options`, `?skin=<id>`, `?anim=<pose>`, `?pos=x,y,z`, `?intro=1`, `?ff=<segundos>` (avança a simulação) e `?clean=1` (título sem botões, para capas).

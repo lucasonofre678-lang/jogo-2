@@ -459,3 +459,7 @@ button.focus, input.focus { outline: 2px solid var(--veil-strong); outline-offse
 #intro-text p { margin: 8px auto; max-width: 760px; font-size: 21px; font-style: italic; line-height: 1.5; color: #f0f4ff; text-shadow: 0 0 12px #000;
   opacity: 0; animation: rise 1.4s ease-out forwards; }
 #intro-skip { position: absolute; right: 22px; bottom: calc(11vh + 14px); font-size: 11px; letter-spacing: 0.25em; color: var(--muted); }
+
+/* modo capa (só desenvolvimento): esconde o que não é título */
+body.clean .title-btns, body.clean .story, body.clean .small, body.clean details, body.clean #version, body.clean #hud { display: none !important; }
+body.clean .screen { background: radial-gradient(ellipse at center, rgba(4, 8, 20, 0) 0%, rgba(2, 3, 8, 0.6) 100%); }

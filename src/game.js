@@ -140,6 +140,8 @@ export class Game {
       if (q.get('anim')) this.demo = q.get('anim');
       if (q.get('pos')) this.respawn(new THREE.Vector3(...q.get('pos').split(',').map(Number)), 0);
       if (q.get('dim')) this.tryShift();
+      if (q.get('intro')) this.startIntro();
+      if (q.get('clean')) document.body.classList.add('clean'); // capa sem botões
       // ?ff=segundos: avança a simulação (para fotos de ações no meio)
       const ff = Number(q.get('ff') ?? 0);
       for (let t = 0; t < ff; t += 1 / 60) this.tick(1 / 60);
@@ -595,6 +597,7 @@ export class Game {
     this.setState('options');
     this.ui.buildOptions(this.settings, (key, v) => {
       this.settings[key] = v;
+      if (key === 'quality') this.settings.qualityLocked = true;
       saveSettings(this.settings);
       this.applySettings();
       if (key === 'volume' || key === 'music') this.audio.menu();
@@ -890,8 +893,34 @@ export class Game {
     this.render();
   }
 
+  // Qualidade automática: se os primeiros segundos de jogo ficarem lentos,
+  // baixa um nível (uma vez por sessão e só se o jogador não escolheu).
+  watchPerformance(realDt) {
+    if (this.state !== 'playing' || this.perfDone || this.settings.qualityLocked) return;
+    this.perf ??= { t: 0, frames: 0 };
+    this.perf.t += realDt;
+    this.perf.frames++;
+    if (this.perf.t < 6) return;
+    const fps = this.perf.frames / this.perf.t;
+    this.perf = { t: 0, frames: 0 };
+    if (fps >= 40) {
+      this.perfDone = true;
+      return;
+    }
+    const next = { alta: 'media', media: 'baixa' }[this.settings.quality];
+    if (!next) {
+      this.perfDone = true;
+      return;
+    }
+    this.settings.quality = next;
+    saveSettings(this.settings);
+    this.applySettings();
+    this.ui.toast(`Qualidade ajustada para ${next === 'media' ? 'média' : 'baixa'} (${Math.round(fps)} FPS)`, 3);
+  }
+
   tick(realDt) {
     this.input.poll();
+    this.watchPerformance(realDt);
     // câmera lenta curta (anéis, fragmentos) e assistência de velocidade
     this.slowmo = Math.max(0, this.slowmo - realDt);
     const dt = realDt * this.settings.gameSpeed * (this.slowmo > 0 ? 0.35 : 1);
