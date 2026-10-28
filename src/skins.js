@@ -69,6 +69,18 @@ export const SKINS = [
     unlock: { kind: 'level', id: 'prova' },
   },
   {
+    id: 'correnteza', name: 'Correnteza', desc: 'Emende um Fluxo de ×12.',
+    cloak: 0x0e2a3a, inner: 0x061820, leather: 0x1a3038, metal: 0x7ad0e0, trim: [0.3, 2.0, 2.6], eye: [1.4, 3.6, 4.2],
+    hood: 'redondo', pattern: 'listras', pauldrons: 1, capeLen: 1.3, capeWidth: 1.15, scarf: 0x1a6a8a,
+    unlock: { kind: 'flow', n: 12 },
+  },
+  {
+    id: 'lira', name: 'Lira', desc: 'Chegue ao fim de O Último Fio.',
+    cloak: 0xe8d4a8, inner: 0x6a5030, leather: 0x8a6a40, metal: 0xffe0a0, trim: [2.6, 1.8, 0.6], eye: [3.6, 3.0, 1.6],
+    hood: 'redondo', pattern: 'estrelas', pauldrons: 0, capeLen: 1.2, capeWidth: 1.1, scarf: 0xd08a30,
+    unlock: { kind: 'level', id: 'ultimofio' },
+  },
+  {
     id: 'tecelao', name: 'Tecelão do Véu', desc: 'Derrote o Colosso e costure o Véu.',
     cloak: 0xc8d4ec, inner: 0x56607a, leather: 0x8a90a0, metal: 0xe0e8ff, trim: [0.5, 1.4, 3.2], eye: [2.6, 3.4, 4.4],
     hood: 'coroa', pattern: 'estrelas', pauldrons: 1, capeLen: 1.35, capeWidth: 1.3, scarf: 0x8ab0ff,
@@ -86,6 +98,7 @@ export function skinUnlocked(skin, progress, levels) {
   if (u.kind === 'level') return best[u.id] !== undefined;
   if (u.kind === 'fragments') return Object.keys(progress.fragments ?? {}).length >= u.n;
   if (u.kind === 'feat') return !!progress.feats?.[u.id]?.[u.feat];
+  if (u.kind === 'flow') return (progress.flowBest ?? 0) >= u.n;
   if (u.kind === 'gold') {
     let n = 0;
     for (const def of levels) if (best[def.id] !== undefined && best[def.id] <= def.medals[0]) n++;

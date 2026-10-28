@@ -4,7 +4,8 @@
 //   escalar bordas, deslizar (C correndo), Gancho do Véu (balançar em
 //   âncoras), correntes de vento, Passo do Véu (estado de avanço),
 //   plataformas móveis que carregam o jogador (e o arremessam quando batem),
-//   trampolins e surf em rampas inclinadas (como no surf do CS).
+//   trampolins, surf em rampas inclinadas (como no surf do CS), corrida na
+//   parede (muros rúnicos) e Fios de Luz (tirolesas).
 // O visual (modelo, tecido e animações) fica em character.js.
 // A velocidade do jogador é relativa à plataforma em que ele está de pé; ao
 // sair dela, a velocidade da plataforma é somada (herança de momento).
@@ -75,6 +76,25 @@ const SURF_LAND_SOAK = 0.7; // quanto do escorregão some ao pousar na rampa
 const SURF_RADIUS = 0.42;
 const FLIP_SPEED = 12.5; // saltar mais rápido que isso dá cambalhota
 
+// corrida na parede (só nos muros rúnicos): entrando de lado no ar, o
+// andarilho corre pela parede; a gravidade volta aos poucos e saltar lança
+// para o lado oposto (dá para ir de parede em parede)
+const WALLRUN_MIN_SPEED = 5.5;
+const WALLRUN_SPEED = 11.5;
+const WALLRUN_TIME = 1.35;
+const WALLRUN_JUMP_OUT = 7.5;
+const WALLRUN_JUMP_UP = 8.6;
+const WALLRUN_COYOTE = 0.16; // ainda dá para saltar logo depois que a parede acaba
+
+// Fios de Luz: segure E perto de um fio para deslizar pendurado; a
+// inclinação acelera (descida) ou freia (subida) e o fim do fio lança você
+export const ZIP_RANGE = 2.4;
+const ZIP_MIN_SPEED = 5;
+const ZIP_MAX_SPEED = 22;
+const ZIP_DRAG = 0.2;
+const ZIP_JUMP_UP = 7.5;
+const ZIP_END_UP = 4.5;
+
 function damp(a, b, k, dt) {
   return a + (b - a) * (1 - Math.exp(-k * dt));
 }
@@ -90,7 +110,7 @@ export class Player {
     this.world = world;
     this.pos = new THREE.Vector3();
     this.vel = new THREE.Vector3();
-    this.state = 'normal'; // normal | hang | climb | dash | slide | swing
+    this.state = 'normal'; // normal | hang | climb | dash | slide | swing | wallrun | zip
     this.height = HEIGHT;
     this.grounded = false;
     this.prevGrounded = false;
@@ -123,6 +143,17 @@ export class Player {
     this.slide = { t: 0, speed: 0, dir: new THREE.Vector3() };
     this.swing = { anchor: null, len: 0 };
     this.anchors = [];
+    this.wallRun = { nx: 0, nz: 0, tx: 0, tz: 0, speed: 0, t: 0 };
+    this.runCol = null; // muro rúnico encostado neste quadro
+    this.runNx = 0;
+    this.runNz = 0;
+    this.lastRunNx = 0;
+    this.lastRunNz = 0;
+    this.runCoyote = 0;
+    this.zips = [];
+    this.zip = { line: null, u: 0, speed: 0 };
+    this.zipU = 0;
+    this.zipCooldown = 0;
     this.wind = null;
     this.impactSpeed = 0;
     this.fallStartY = 0;
@@ -155,6 +186,8 @@ export class Player {
     this.onGrapple = null;
     this.onRelease = null;
     this.onRoll = null;
+    this.onWallRun = null;
+    this.onZip = null;
 
     this.model = new Character(scene);
     this.root = this.model.root;
@@ -209,6 +242,10 @@ export class Player {
     this.celebrate = false;
     this.wake = 0;
     this.swing.anchor = null;
+    this.zip.line = null;
+    this.lastRunNx = this.lastRunNz = 0;
+    this.runCoyote = 0;
+    this.zipCooldown = 0;
     this.facing = yaw + Math.PI; // de costas para a câmera
     this.fallStartY = pos.y;
     this.surfing = false;
@@ -234,7 +271,7 @@ export class Player {
 
   canDash() {
     if (this.state === 'hang' || this.state === 'climb' || this.state === 'dash') return false;
-    return this.grounded || this.coyote > 0 || !this.airDashUsed || this.state === 'swing';
+    return this.grounded || this.coyote > 0 || !this.airDashUsed || this.state === 'swing' || this.state === 'zip' || this.state === 'wallrun';
   }
 
   startDash(dir) {
@@ -245,6 +282,8 @@ export class Player {
       cz = this.groundCol.vz;
     }
     if (this.state === 'swing') this.releaseSwing(false);
+    if (this.state === 'zip') this.leaveZip(false);
+    if (this.state === 'wallrun') this.endWallRun();
     this.dashDir.copy(dir).setY(0).normalize();
     // mantém o embalo: sai do avanço tão rápido quanto entrou
     const along = this.vel.x * this.dashDir.x + this.vel.z * this.dashDir.z;
@@ -264,6 +303,7 @@ export class Player {
   boost(dx, dy, dz, speed) {
     if (this.state === 'hang' || this.state === 'climb') return;
     if (this.state === 'swing') this.releaseSwing(false);
+    if (this.state === 'zip') this.leaveZip(false);
     this.state = 'normal';
     this.dashing = false;
     this.vel.set(dx * speed, dy * speed, dz * speed);
@@ -295,6 +335,8 @@ export class Player {
     this.jumpBuffer -= dt;
     this.wallTimer -= dt;
     this.wallLock -= dt;
+    this.runCoyote -= dt;
+    this.zipCooldown -= dt;
     if (ctrl.jumpPressed) this.jumpBuffer = JUMP_BUFFER;
 
     const moveLen = Math.hypot(ctrl.move.x, ctrl.move.z);
@@ -306,9 +348,17 @@ export class Player {
 
     this.applyCarry();
 
-    if (ctrl.grapplePressed && this.state !== 'swing') this.tryGrapple();
+    // E: um Fio de Luz ao alcance tem preferência sobre as âncoras; segurando
+    // E no ar, o andarilho agarra o fio sozinho ao passar perto dele
+    if (ctrl.grapplePressed && this.state !== 'swing' && this.state !== 'zip') {
+      if (!this.tryZip()) this.tryGrapple();
+    } else if (ctrl.grappleHeld && !this.grounded && this.zipCooldown <= 0 && (this.state === 'normal' || this.state === 'wallrun')) {
+      this.tryZip();
+    }
 
     if (this.state === 'hang') this.updateHang(dt, ctrl);
+    else if (this.state === 'wallrun') this.updateWallRun(dt, ctrl);
+    else if (this.state === 'zip') this.updateZip(dt, ctrl);
     else if (this.state === 'climb') this.updateClimb(dt);
     else if (this.state === 'dash') this.updateDash(dt);
     else if (this.state === 'slide') this.updateSlide(dt, ctrl);
@@ -453,6 +503,8 @@ export class Player {
     // Salto (com buffer e coyote time) ou pulo na parede
     if (this.jumpBuffer > 0 && (this.grounded || this.coyote > 0) && !this.low) {
       this.doJump(speed);
+    } else if (this.jumpBuffer > 0 && !this.grounded && this.runCoyote > 0) {
+      this.wallRunJump();
     } else if (this.jumpBuffer > 0 && !this.grounded && this.wallTimer > 0 && this.canWallJump()) {
       this.wallJump();
     } else if (this.jumpBuffer > 0 && this.surfing) {
@@ -485,6 +537,11 @@ export class Player {
     this.move(dt, false);
     if (!this.grounded) this.vel.y = Math.max(this.vel.y - g * dt * 0.5, -MAX_FALL);
     this.convertFrame(before, this.grounded ? this.groundCol : null);
+
+    if (this.runCol && !this.grounded && this.canWallRun(ctrl, moveLen)) {
+      this.startWallRun();
+      return;
+    }
 
     // Deslizar na parede: segurando contra ela, a queda fica lenta.
     this.wallSliding = false;
@@ -767,6 +824,210 @@ export class Player {
     }
   }
 
+  // ------------------------------------------------------------ parede
+  canWallRun(ctrl, moveLen) {
+    if (this.state !== 'normal' || this.surfing || moveLen < 0.3 || this.vel.y < -14) return false;
+    const nx = this.runNx;
+    const nz = this.runNz;
+    // a mesma parede só de novo depois de pousar (não dá para escalar saltando)
+    if (nx * this.lastRunNx + nz * this.lastRunNz > 0.7) return false;
+    // pedindo para sair da parede
+    if (ctrl.move.x * nx + ctrl.move.z * nz > 0.4) return false;
+    const vn = this.vel.x * nx + this.vel.z * nz;
+    return Math.hypot(this.vel.x - vn * nx, this.vel.z - vn * nz) >= WALLRUN_MIN_SPEED;
+  }
+
+  startWallRun() {
+    const w = this.wallRun;
+    const nx = this.runNx;
+    const nz = this.runNz;
+    const vn = this.vel.x * nx + this.vel.z * nz;
+    const tx = this.vel.x - vn * nx;
+    const tz = this.vel.z - vn * nz;
+    const sp = Math.hypot(tx, tz);
+    w.nx = nx;
+    w.nz = nz;
+    w.tx = tx / sp;
+    w.tz = tz / sp;
+    w.t = 0;
+    w.speed = Math.max(sp, Math.min(WALLRUN_SPEED, sp + 3));
+    this.state = 'wallrun';
+    this.vel.y = Math.max(this.vel.y * 0.4, 3.4);
+    this.jumping = false;
+    this.airDashUsed = false;
+    this.wallSliding = false;
+    this.onWallRun?.(this.wallRunSide());
+  }
+
+  // 1: parede à direita do andarilho, -1: à esquerda
+  wallRunSide() {
+    const w = this.wallRun;
+    // direita de quem olha para (tx, tz) = (-tz, tx); a parede fica em -n
+    return w.nx * w.tz - w.nz * w.tx >= 0 ? 1 : -1;
+  }
+
+  updateWallRun(dt, ctrl) {
+    const w = this.wallRun;
+    w.t += dt;
+    // segurar para frente mantém a corrida; soltar desacelera
+    const fwdIn = ctrl.move.x * w.tx + ctrl.move.z * w.tz;
+    const target = fwdIn > 0.2 ? WALLRUN_SPEED : 2;
+    w.speed += (target - w.speed) * Math.min(1, (w.speed > target ? 0.8 : 2.5) * dt);
+    if (this.jumpBuffer > 0) {
+      this.wallRunJump();
+      return;
+    }
+    // a gravidade volta aos poucos
+    const k = Math.min(1, w.t / WALLRUN_TIME);
+    this.vel.y = Math.max(this.vel.y - GRAVITY * (0.1 + 0.75 * k * k * k) * dt, -MAX_FALL);
+    this.vel.x = w.tx * w.speed - w.nx * 1.5; // encosta na parede
+    this.vel.z = w.tz * w.speed - w.nz * 1.5;
+    this.move(dt, false);
+    this.stepPhase += dt * (5 + w.speed * 1.05);
+    const idx = Math.floor(this.stepPhase / Math.PI);
+    if (idx !== this.lastStepIndex) {
+      this.lastStepIndex = idx;
+      this.onStep?.('run');
+    }
+    if (this.grounded) {
+      this.state = 'normal';
+      this.vel.x = w.tx * w.speed;
+      this.vel.z = w.tz * w.speed;
+      return;
+    }
+    const away = ctrl.move.x * w.nx + ctrl.move.z * w.nz;
+    const onWall = this.runCol && this.runNx * w.nx + this.runNz * w.nz > 0.9;
+    if (!onWall || w.t > WALLRUN_TIME || w.speed < 3 || away > 0.6) {
+      this.endWallRun();
+      // a parede acabou: um instante para ainda saltar dela
+      if (!onWall) this.runCoyote = WALLRUN_COYOTE;
+    }
+  }
+
+  endWallRun() {
+    const w = this.wallRun;
+    this.state = 'normal';
+    this.vel.x = w.tx * w.speed + w.nx * 1.2;
+    this.vel.z = w.tz * w.speed + w.nz * 1.2;
+    this.lastRunNx = w.nx;
+    this.lastRunNz = w.nz;
+    this.airSpeedCap = Math.min(MAX_AIR_SPEED, Math.max(RUN, w.speed));
+    this.fallStartY = this.pos.y;
+    this.wallTimer = 0;
+  }
+
+  wallRunJump() {
+    const w = this.wallRun;
+    this.state = 'normal';
+    this.runCoyote = 0;
+    this.vel.x = w.tx * w.speed + w.nx * WALLRUN_JUMP_OUT;
+    this.vel.z = w.tz * w.speed + w.nz * WALLRUN_JUMP_OUT;
+    this.vel.y = WALLRUN_JUMP_UP;
+    // nem correr nem pular de novo nesta mesma parede antes de pousar
+    this.lastRunNx = this.lastWallNx = w.nx;
+    this.lastRunNz = this.lastWallNz = w.nz;
+    this.wallNx = w.nx;
+    this.wallNz = w.nz;
+    this.wallLock = 0.22;
+    this.wallTimer = 0;
+    this.jumpBuffer = 0;
+    this.jumping = true;
+    this.jumpCut = false;
+    this.airDashUsed = false;
+    this.airSpeedCap = Math.min(MAX_AIR_SPEED, Math.max(RUN, Math.hypot(this.vel.x, this.vel.z)));
+    this.facing = Math.atan2(this.vel.x, this.vel.z);
+    this.fallStartY = this.pos.y;
+    this.model.startFlip(this.wallRunSide() > 0 ? 'twistL' : 'twistR');
+    this.onWallJump?.();
+  }
+
+  // ------------------------------------------------------------ fios
+  // Fio de Luz mais perto das mãos (guarda em zipU o ponto do fio).
+  findZip() {
+    let best = null;
+    let bestD = ZIP_RANGE;
+    const hx = this.pos.x;
+    const hy = this.pos.y + HAND_Y;
+    const hz = this.pos.z;
+    for (const z of this.zips) {
+      const u = THREE.MathUtils.clamp((hx - z.a.x) * z.dir.x + (hy - z.a.y) * z.dir.y + (hz - z.a.z) * z.dir.z, 0.3, z.len - 0.6);
+      const d = Math.hypot(z.a.x + z.dir.x * u - hx, z.a.y + z.dir.y * u - hy, z.a.z + z.dir.z * u - hz);
+      if (d < bestD) {
+        bestD = d;
+        best = z;
+        this.zipU = u;
+      }
+    }
+    return best;
+  }
+
+  tryZip() {
+    if (this.state === 'hang' || this.state === 'climb' || this.state === 'dash' || this.state === 'zip') return false;
+    const z = this.findZip();
+    if (!z) return false;
+    if (this.state === 'slide') this.tryStand();
+    if (this.state === 'swing') this.swing.anchor = null;
+    if (this.grounded && this.groundCol) this.convertFrame(this.groundCol, null);
+    const d = z.dir;
+    let s = this.vel.x * d.x + this.vel.y * d.y + this.vel.z * d.z;
+    // começa ao menos na velocidade mínima: a favor da descida (ou do embalo)
+    if (Math.abs(s) < ZIP_MIN_SPEED) s = (Math.abs(d.y) > 0.03 ? -Math.sign(d.y) : Math.sign(s) || 1) * ZIP_MIN_SPEED;
+    this.state = 'zip';
+    this.zip.line = z;
+    this.zip.u = this.zipU;
+    this.zip.speed = s;
+    this.grounded = false;
+    this.groundCol = null;
+    this.jumping = false;
+    this.airDashUsed = false;
+    this.height = HEIGHT;
+    this.onZip?.(z);
+    return true;
+  }
+
+  updateZip(dt, ctrl) {
+    const zp = this.zip;
+    const z = zp.line;
+    if (!ctrl.grappleHeld) {
+      this.leaveZip(false);
+      return;
+    }
+    if (this.jumpBuffer > 0) {
+      this.leaveZip(true);
+      return;
+    }
+    // a inclinação acelera ou freia; W/S empurram de leve
+    zp.speed -= GRAVITY * z.dir.y * dt;
+    zp.speed += (ctrl.move.x * z.dir.x + ctrl.move.z * z.dir.z) * 4 * dt;
+    zp.speed -= zp.speed * ZIP_DRAG * dt;
+    zp.speed = THREE.MathUtils.clamp(zp.speed, -ZIP_MAX_SPEED, ZIP_MAX_SPEED);
+    zp.u += zp.speed * dt;
+    const end = zp.u >= z.len || zp.u <= 0;
+    zp.u = THREE.MathUtils.clamp(zp.u, 0, z.len);
+    this.pos.set(z.a.x + z.dir.x * zp.u, z.a.y + z.dir.y * zp.u - HAND_Y - 0.08, z.a.z + z.dir.z * zp.u);
+    this.vel.set(z.dir.x * zp.speed, z.dir.y * zp.speed, z.dir.z * zp.speed);
+    this.fallStartY = this.pos.y;
+    if (end) this.leaveZip(false, true);
+  }
+
+  // jump: salto para fora · atEnd: o fio acabou e lança o andarilho
+  leaveZip(jump, atEnd = false) {
+    const z = this.zip.line;
+    const s = this.zip.speed;
+    this.state = 'normal';
+    this.zip.line = null;
+    if (z) this.vel.set(z.dir.x * s, z.dir.y * s, z.dir.z * s);
+    if (jump) this.vel.y = Math.max(this.vel.y, 0) + ZIP_JUMP_UP;
+    else if (atEnd) this.vel.y = Math.max(this.vel.y, 0) + ZIP_END_UP;
+    this.jumpBuffer = 0;
+    this.jumping = false;
+    this.airDashUsed = false;
+    this.zipCooldown = 0.4;
+    this.airSpeedCap = Math.min(MAX_AIR_SPEED, Math.max(RUN, this.horizontalSpeed));
+    this.fallStartY = this.pos.y;
+    this.onRelease?.(jump || atEnd);
+  }
+
   updateDash(dt) {
     this.dashTime -= dt;
     this.vel.set(this.dashDir.x * DASH_SPEED + this.dashCarry.x, 0, this.dashDir.z * DASH_SPEED + this.dashCarry.z);
@@ -804,6 +1065,7 @@ export class Player {
     const wasGrounded = this.grounded;
     this.grounded = false;
     this.groundCol = null;
+    this.runCol = null;
 
     for (let s = 0; s < steps; s++) {
       this.pos.x += this.vel.x * h;
@@ -848,6 +1110,12 @@ export class Player {
           this.wallTimer = WALL_MEMORY;
           this.wallNx = push.nx;
           this.wallNz = push.nz;
+          // muro rúnico cobrindo o corpo: dá para correr nele
+          if (c.runnable && c.maxY > this.pos.y + 1.3 && c.minY < this.pos.y + 0.5) {
+            this.runCol = c;
+            this.runNx = push.nx;
+            this.runNz = push.nz;
+          }
         }
         any = true;
       }
@@ -939,6 +1207,7 @@ export class Player {
     this.airSpeedCap = 0;
     this.jumping = false;
     this.lastWallNx = this.lastWallNz = 0;
+    this.lastRunNx = this.lastRunNz = 0;
     const drop = this.fallStartY - this.pos.y;
     // queda alta correndo: rolamento (sem o baque)
     if (impact > ROLL_IMPACT && this.horizontalSpeed > 4 && this.state === 'normal' && !this.bounceCol) {
@@ -1071,6 +1340,12 @@ export class Player {
     if (this.state === 'dash') targetFacing = Math.atan2(this.dashDir.x, this.dashDir.z);
     if (this.state === 'hang' || this.state === 'climb') targetFacing = Math.atan2(-this.hang.nx, -this.hang.nz);
     if (this.wallSliding) targetFacing = Math.atan2(-this.wallNx, -this.wallNz);
+    if (this.state === 'wallrun') targetFacing = Math.atan2(this.wallRun.tx, this.wallRun.tz);
+    if (this.state === 'zip' && this.zip.line) {
+      const d = this.zip.line.dir;
+      const sg = this.zip.speed >= 0 ? 1 : -1;
+      if (Math.hypot(d.x, d.z) > 0.05) targetFacing = Math.atan2(d.x * sg, d.z * sg);
+    }
     this.facing += wrapAngle(targetFacing - this.facing) * (1 - Math.exp(-14 * dt));
     this.model.update(dt, this, this.world);
   }

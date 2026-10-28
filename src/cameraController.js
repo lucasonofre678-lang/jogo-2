@@ -20,6 +20,7 @@ export class CameraController {
     this.focus = new THREE.Vector3();
     this.shake = 0;
     this.dip = 0;
+    this.roll = 0; // inclina a imagem na corrida na parede
     this.baseFov = 68;
     this.fov = 68;
     this.firstPerson = false;
@@ -131,6 +132,10 @@ export class CameraController {
       cam.position.z += (Math.random() - 0.5) * s;
     }
     cam.lookAt(this.tmp);
+    // correndo na parede, o horizonte inclina para longe dela
+    const rollTarget = player.state === 'wallrun' ? (player.wallSide ?? player.wallRunSide()) * 0.085 : 0;
+    this.roll += (rollTarget - this.roll) * (1 - Math.exp(-7 * dt));
+    if (Math.abs(this.roll) > 0.001) cam.rotateZ(this.roll);
 
     let fovTarget = this.baseFov + speedK * 22;
     if (player.state === 'dash') fovTarget = 92;

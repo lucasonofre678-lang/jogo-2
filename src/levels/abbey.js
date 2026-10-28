@@ -6,6 +6,7 @@
 //   4. Santuário com o Artefato do Véu
 import * as THREE from 'three';
 import { VEIL } from '../physics.js';
+import { PoolLight } from '../lights.js';
 import { A } from './builder.js';
 
 // ======================================================= 1. Pátio de entrada
@@ -320,7 +321,7 @@ function sanctum(b) {
     art.add(s);
     shards.push(s);
   }
-  const light = new THREE.PointLight(0x7ab8ff, 30, 18, 2);
+  const light = new PoolLight(0x7ab8ff, 30, 18, 2);
   art.add(light);
   b.group.add(art);
   const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.7, 14, 20, 1, true), new THREE.MeshBasicMaterial({

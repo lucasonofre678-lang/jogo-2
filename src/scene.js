@@ -29,6 +29,11 @@ export const ENVS = {
     fog: 0x0e2622, density: 0.012, top: 0x010806, moon: 0xc0ffe8, moonI: 2.4,
     hemiSky: 0x70d0b0, hemiGround: 0x081410, hemiI: 1.15, fill: 0x60c0a0, exposure: 1.25, mist: [0.3, 0.6, 0.55],
   },
+  // pôr do sol dourado dos caminhos de Lira (capítulo VII)
+  poente: {
+    fog: 0x2e1a26, density: 0.012, top: 0x0a0412, moon: 0xffd2a0, moonI: 2.4,
+    hemiSky: 0xd09a80, hemiGround: 0x1a1012, hemiI: 1.15, fill: 0xc08a70, exposure: 1.22, mist: [0.75, 0.48, 0.45],
+  },
   // o outro lado do Véu (tecla F)
   veu: {
     fog: 0x1c0d34, density: 0.016, top: 0x060112, moon: 0xd8b8ff, moonI: 2.3,
@@ -107,7 +112,9 @@ function createSky() {
 }
 
 export function createScene(container) {
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  // Sem MSAA no canvas: com o bloom a cena é desenhada no alvo do
+  // pós-processamento (o antisserrilhado fica lá, ver setSamples).
+  const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -152,11 +159,15 @@ export function createScene(container) {
   scene.add(moon);
   scene.add(moon.target);
 
-  const composer = new EffectComposer(renderer);
+  const pr = renderer.getPixelRatio();
+  const target = new THREE.WebGLRenderTarget(window.innerWidth * pr, window.innerHeight * pr, { type: THREE.HalfFloatType });
+  const composer = new EffectComposer(renderer, target);
+  composer.setSize(window.innerWidth, window.innerHeight);
   composer.addPass(new RenderPass(scene, camera));
   const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.8, 0.55, 0.8);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
+  let bloomScale = 1;
 
   const resizeListeners = [];
   function resize() {
@@ -166,8 +177,22 @@ export function createScene(container) {
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
     composer.setSize(w, h);
-    bloom.setSize(w, h);
+    bloom.setSize(Math.round(w * bloomScale), Math.round(h * bloomScale));
     for (const fn of resizeListeners) fn(w, h);
+  }
+
+  // Qualidade: amostras de MSAA no alvo da cena e resolução do bloom (o
+  // brilho é borrado, meia resolução quase não muda o visual).
+  function setQuality(samples, scale) {
+    for (const rt of [composer.renderTarget1, composer.renderTarget2]) {
+      if (rt.samples === samples) continue;
+      rt.samples = samples;
+      rt.dispose();
+    }
+    if (scale !== bloomScale) {
+      bloomScale = scale;
+      resize();
+    }
   }
   window.addEventListener('resize', resize);
 
@@ -199,5 +224,5 @@ export function createScene(container) {
     moon.position.copy(tmp).addScaledVector(MOON_DIR, 90);
   }
 
-  return { renderer, scene, camera, composer, bloom, moon, sky, resizeListeners, followMoon, setEnv, resize };
+  return { renderer, scene, camera, composer, bloom, moon, sky, resizeListeners, followMoon, setEnv, resize, setQuality };
 }

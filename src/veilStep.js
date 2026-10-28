@@ -81,7 +81,10 @@ export class VeilStep {
         const c = vb.collider;
         if (p.x + RADIUS > c.minX && p.x - RADIUS < c.maxX && p.z + RADIUS > c.minZ && p.z - RADIUS < c.maxZ
           && p.y < c.maxY && p.y + HEIGHT > c.minY) {
-          if (vb.flash < 0.5) this.game.audio.veilPass();
+          if (vb.flash < 0.5) {
+            this.game.audio.veilPass();
+            this.game.flowMove('travessia');
+          }
           vb.flash = 1;
           effects.sparks(p.x, p.y + 1, p.z, 4, { speed: 5, life: 0.9, spread: 1.4, whiteChance: 0.2 });
         }

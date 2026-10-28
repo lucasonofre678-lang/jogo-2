@@ -46,6 +46,7 @@ class ParticlePool {
     this.gravity = new Float32Array(max);
     this.drag = new Float32Array(max);
     this.cursor = 0;
+    this.awake = false; // há partículas vivas (ou zeros a enviar)?
 
     const geo = new THREE.BufferGeometry();
     this.posAttr = new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage);
@@ -68,6 +69,7 @@ class ParticlePool {
     this.points = new THREE.Points(geo, mat);
     this.points.frustumCulled = false;
     this.points.renderOrder = 5;
+    this.points.visible = false;
     scene.add(this.points);
   }
 
@@ -91,14 +93,19 @@ class ParticlePool {
     this.alpha0[i] = o.alpha ?? 1;
     this.gravity[i] = o.gravity ?? 0;
     this.drag[i] = o.drag ?? 1;
+    this.awake = true;
+    this.colAttr.needsUpdate = true;
   }
 
   update(dt) {
+    if (!this.awake) return;
+    let alive = 0;
     for (let i = 0; i < this.max; i++) {
       if (this.life[i] <= 0) {
         this.alpha[i] = 0;
         continue;
       }
+      alive++;
       this.life[i] -= dt;
       const t = 1 - Math.max(this.life[i], 0) / this.maxLife[i];
       const i3 = i * 3;
@@ -113,14 +120,17 @@ class ParticlePool {
       this.alpha[i] = this.alpha0[i] * (t < 0.15 ? t / 0.15 : 1 - (t - 0.15) / 0.85);
     }
     this.posAttr.needsUpdate = true;
-    this.colAttr.needsUpdate = true;
     this.sizeAttr.needsUpdate = true;
     this.alphaAttr.needsUpdate = true;
+    this.points.visible = alive > 0;
+    this.awake = alive > 0;
   }
 
   clear() {
     this.life.fill(0);
     this.alpha.fill(0);
+    this.points.visible = false;
+    this.awake = false;
   }
 }
 
@@ -146,6 +156,10 @@ const SHELL_FRAG = /* glsl */ `
 const VEIL_BLUE = new THREE.Color(0.35, 0.75, 2.2);
 const VEIL_WHITE = new THREE.Color(1.4, 1.9, 2.6);
 const DUST = new THREE.Color(0.42, 0.45, 0.52);
+const GHOST_LIFE = 0.42;
+// cor de cada cópia do rastro no início (já com a antiga opacidade de 0,32)
+const GHOST_COLOR = new THREE.Color(0.2, 0.48, 1.35).multiplyScalar(0.32);
+const GHOST_DARK = new THREE.Color(0, 0, 0);
 
 export class Effects {
   constructor(scene) {
@@ -153,8 +167,10 @@ export class Effects {
     this.scaleUniform = { value: 600 };
     this.magic = new ParticlePool(scene, 2400, THREE.AdditiveBlending, this.scaleUniform);
     this.dustPool = new ParticlePool(scene, 700, THREE.NormalBlending, this.scaleUniform);
-    this.ghosts = [];
+    this.ghostParts = [];
+    this.ghostLife = [];
     this.ghostCursor = 0;
+    this.ghostsAlive = false;
     this.rings = [];
     this.motes = [];
     this.tmpColor = new THREE.Color();
@@ -165,14 +181,14 @@ export class Effects {
     for (let i = 0; i < 6; i++) {
       const mat = new THREE.MeshBasicMaterial({
         color: VEIL_BLUE, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
-        depthWrite: false, side: THREE.DoubleSide,
+        depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true,
       });
       const ring = new THREE.Mesh(ringGeo, mat);
       const shellMat = new THREE.ShaderMaterial({
         uniforms: { color: { value: VEIL_BLUE.clone() }, opacity: { value: 0 } },
         vertexShader: SHELL_VERT,
         fragmentShader: SHELL_FRAG,
-        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true,
       });
       const shell = new THREE.Mesh(shellGeo, shellMat);
       ring.visible = shell.visible = false;
@@ -185,46 +201,52 @@ export class Effects {
     this.scaleUniform.value = (height * 0.5) / Math.tan(THREE.MathUtils.degToRad(fov) / 2);
   }
 
-  // Clones do andarilho usados como imagens residuais azuis.
+  // Imagens residuais azuis do andarilho: uma InstancedMesh por peça do
+  // corpo, cada cópia é uma instância. O rastro inteiro custa uma chamada de
+  // desenho por peça, não uma por peça de cada cópia.
   initGhosts(source, count = 14) {
-    const srcNodes = [];
-    source.traverse((o) => srcNodes.push(o));
-    this.ghostSrc = srcNodes;
-    for (let i = 0; i < count; i++) {
-      const mat = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(0.2, 0.48, 1.35), transparent: true, opacity: 0,
-        depthWrite: false,
-      });
-      const g = source.clone(true);
-      const nodes = [];
-      g.traverse((o) => {
-        nodes.push(o);
-        if (o.isMesh) {
-          o.material = mat;
-          o.castShadow = false;
-          o.receiveShadow = false;
-        }
-      });
-      g.visible = false;
-      this.scene.add(g);
-      this.ghosts.push({ group: g, nodes, mat, life: 0 });
-    }
+    this.ghostSource = source;
+    this.ghostCount = count;
+    this.ghostMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    this.ghostGroup = new THREE.Group();
+    this.ghostGroup.visible = false;
+    this.scene.add(this.ghostGroup);
+    const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+    source.traverse((o) => {
+      if (!o.isMesh) return;
+      const im = new THREE.InstancedMesh(o.geometry, this.ghostMat, count);
+      im.frustumCulled = false;
+      im.matrixAutoUpdate = false;
+      for (let i = 0; i < count; i++) {
+        im.setMatrixAt(i, hidden);
+        im.setColorAt(i, GHOST_DARK);
+      }
+      this.ghostGroup.add(im);
+      this.ghostParts.push({ src: o, im });
+    });
+    this.ghostLife = new Float32Array(count);
+    this.ghostHidden = hidden;
   }
 
   ghost() {
-    if (!this.ghosts.length) return;
-    const gh = this.ghosts[this.ghostCursor];
-    this.ghostCursor = (this.ghostCursor + 1) % this.ghosts.length;
-    for (let i = 0; i < gh.nodes.length; i++) {
-      const s = this.ghostSrc[i];
-      const d = gh.nodes[i];
-      d.position.copy(s.position);
-      d.quaternion.copy(s.quaternion);
-      d.scale.copy(s.scale);
-      d.visible = s.visible;
+    if (!this.ghostParts.length) return;
+    const slot = this.ghostCursor;
+    this.ghostCursor = (this.ghostCursor + 1) % this.ghostCount;
+    const root = this.ghostSource;
+    root.updateMatrixWorld(true);
+    for (const { src, im } of this.ghostParts) {
+      // a peça aparece se ela e os pais estão visíveis (o corpo inteiro pode
+      // estar oculto na primeira pessoa: o rastro aparece mesmo assim)
+      let vis = true;
+      for (let q = src; q && q !== root; q = q.parent) if (!q.visible) vis = false;
+      im.setMatrixAt(slot, vis ? src.matrixWorld : this.ghostHidden);
+      im.instanceMatrix.needsUpdate = true;
     }
-    gh.group.visible = true;
-    gh.life = 0.42;
+    this.ghostLife[slot] = GHOST_LIFE;
+    this.ghostsAlive = true;
+    this.ghostGroup.visible = true;
   }
 
   ring(x, y, z, radius, duration = 0.9, color = VEIL_BLUE, withShell = true) {
@@ -339,10 +361,11 @@ export class Effects {
     return points;
   }
 
+  // O material não é descartado: o shader das partículas fica no cache e a
+  // próxima fase não recompila.
   removeMotes(points) {
     this.scene.remove(points);
     points.geometry.dispose();
-    points.material.dispose();
     this.motes = this.motes.filter((m) => m !== points.material);
   }
 
@@ -351,12 +374,7 @@ export class Effects {
     this.dustPool.update(dt);
     for (const m of this.motes) m.uniforms.uTime.value = time;
 
-    for (const gh of this.ghosts) {
-      if (gh.life <= 0) continue;
-      gh.life -= dt;
-      gh.mat.opacity = Math.max(0, gh.life / 0.42) * 0.32;
-      if (gh.life <= 0) gh.group.visible = false;
-    }
+    if (this.ghostsAlive) this.updateGhosts(dt);
 
     for (const r of this.rings) {
       if (r.life <= 0) continue;
@@ -372,12 +390,31 @@ export class Effects {
     }
   }
 
+  // Esmaece cada cópia pela cor da instância (com mistura aditiva, cor mais
+  // escura = mais transparente).
+  updateGhosts(dt) {
+    let alive = 0;
+    const c = this.tmpColor;
+    for (let i = 0; i < this.ghostCount; i++) {
+      if (this.ghostLife[i] <= 0) continue;
+      this.ghostLife[i] -= dt;
+      const k = Math.max(0, this.ghostLife[i] / GHOST_LIFE);
+      if (this.ghostLife[i] > 0) alive++;
+      c.copy(GHOST_COLOR).multiplyScalar(k);
+      for (const { im } of this.ghostParts) im.setColorAt(i, c);
+    }
+    for (const { im } of this.ghostParts) im.instanceColor.needsUpdate = true;
+    this.ghostsAlive = alive > 0;
+    if (!alive) this.ghostGroup.visible = false;
+  }
+
   clear() {
     this.magic.clear();
     this.dustPool.clear();
-    for (const gh of this.ghosts) {
-      gh.life = 0;
-      gh.group.visible = false;
+    if (this.ghostParts.length) {
+      this.ghostLife.fill(0);
+      this.ghostsAlive = false;
+      this.ghostGroup.visible = false;
     }
     for (const r of this.rings) {
       r.life = 0;

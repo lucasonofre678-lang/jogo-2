@@ -1,9 +1,9 @@
-# VEIL  ·  v1.0
+# VEIL  ·  v1.1
 
 ![VEIL](press/04-colosso.png)
 
 Parkour místico em terceira pessoa. Um andarilho encapuzado acorda nas ruínas
-da Abadia Submersa, sem memória, e atravessa 27 fases em 6 capítulos para
+da Abadia Submersa, sem memória, e atravessa 33 fases em 7 capítulos para
 costurar o Véu que ele mesmo rasgou.
 
 Feito com **Three.js + Vite**, sem modelos, texturas ou sons externos: toda a
@@ -29,10 +29,10 @@ Clique na tela para começar. O mouse fica preso à janela (Pointer Lock);
 | Teclado | Controle | Ação |
 | --- | --- | --- |
 | `W A S D` + mouse | analógicos | mover / câmera |
-| `Espaço` | A / ✕ | saltar (segurar vai mais alto) · pulo na parede |
+| `Espaço` | A / ✕ | saltar (segurar vai mais alto) · pulo na parede · salto da parede |
 | `Q` | X / □ · RB | **Passo do Véu** (avanço; uma vez no ar) |
 | `C` | B / ○ · LT | correndo: **deslizar** · parado: esgueirar/engatinhar |
-| `E` (segurar) | LB · RT | **Gancho do Véu** nas âncoras de luz |
+| `E` (segurar) | LB · RT | **Gancho do Véu** nas âncoras de luz · **Fio de Luz** |
 | `F` | Y / △ | **atravessar para o outro lado** do Véu |
 | `Shift` | analógico leve | andar |
 | `R` | Back | reiniciar a fase |
@@ -61,6 +61,10 @@ Abade virou o Colosso, e o andarilho esqueceu tudo. Cada fase tem um
 | IV — O Outro Lado | Respiração · O Outro Lado · A Sombra · Fundo do Mundo · **Labirinto de Runas** |
 | V — O Coração do Véu | Abadia Submersa (stealth) · Coração do Véu · **O Colosso** (luta final) |
 | VI — Além do Véu | **Crista Partida** (surf difícil) · **Tempestade de Âncoras** · **Prova do Tecelão** (todas as mecânicas) |
+| VII — Os Fios de Lira | **Muros de Lira** · **Fios de Luz** · **Zigue-Zague** · **O Tear do Céu** · **Pega-Pega** (com a Sombra) · **O Último Fio** |
+
+O capítulo VII abre ao derrotar o Colosso: são os caminhos que Lira corria
+quando criança, com corrida na parede e Fios de Luz.
 
 Cada fase tem medalhas de ouro, prata e bronze por tempo, além de desafios:
 terminar sem morrer (✝), sem usar o Passo do Véu (◇) e achar o fragmento (◆).
@@ -87,6 +91,16 @@ terminar sem morrer (✝), sem usar o Passo do Véu (◇) e achar o fragmento (�
   segure a direção **contra** a rampa (`A`/`D`) — a gravidade dá a velocidade
   (passa de 40 m/s). `Espaço` salta para fora da rampa. Há barras sobre as
   cristas e rampas que só existem do outro lado do Véu.
+- **Corrida na parede** (muros dourados): no ar, encoste de lado num muro
+  rúnico e segure para frente. A gravidade volta aos poucos; `Espaço` salta
+  para o muro da frente e cada salto emendado acelera (zigue-zague).
+- **Fios de Luz**: perto de um fio, segure `E` para deslizar pendurado. A
+  descida acelera (até 22 m/s), a subida freia e o fim do fio lança você.
+  Segurando `E` no ar, o andarilho agarra o próximo fio sozinho.
+- **Fluxo**: emendar movimentos sem parar no chão (paredes, fios, gancho,
+  trampolins, anéis, surf, barreiras do Véu, troca de mundo no ar) monta uma
+  sequência — contador no HUD, um sino cada vez mais agudo e o maior Fluxo no
+  fim da fase.
 - **Runas e portões**: tocar uma runa abre portões, alguns só por segundos.
 - **O Colosso**: o punho cai onde está o círculo vermelho (depois vira chão);
   o braço varre a arena baixo (pule) ou alto (deslize). Acenda as três runas.
@@ -101,7 +115,7 @@ terminar sem morrer (✝), sem usar o Passo do Véu (◇) e achar o fragmento (�
 
 ## Extras
 
-- **Andarilho**: 12 mantos desbloqueados por feitos, que mudam também a forma
+- **Andarilho**: 14 mantos desbloqueados por feitos, que mudam também a forma
   (capuz pontudo/redondo, chifres, coroa, máscara, ombreiras, armadura,
   estampas da capa: runas, estrelas, chamas, penas, listras) e o tamanho da
   capa. A tela do Andarilho tem prévia das animações (parado, marcha,
@@ -127,10 +141,12 @@ terminar sem morrer (✝), sem usar o Passo do Véu (◇) e achar o fragmento (�
 src/
   main.js              ponto de entrada
   game.js              estados do jogo, fases, speedrun, fragmentos, mundos, final
-  scene.js             renderizador, céu, névoa, ambientes (inclusive o outro lado), bloom
+  scene.js             renderizador, céu, névoa, ambientes (inclusive o outro lado), bloom, MSAA
+  lights.js            luzes pontuais em vagas fixas (os shaders nunca recompilam)
   materials.js         texturas procedurais e materiais
   physics.js           mundo de colisão (AABB), raycast, chão
-  player.js            andarilho: física (movimento, deslize, gancho, vento, surf)
+  player.js            andarilho: física (movimento, deslize, gancho, vento, surf,
+                       corrida na parede, Fios de Luz)
   character.js         andarilho: modelo, acessórios, tecido e animações
   skins.js             mantos e regras de desbloqueio
   echo.js              fantasma do recorde (gravação) e a Sombra
@@ -145,8 +161,9 @@ src/
     mechanics.js       fases das mecânicas novas
     surf.js            surf
     trials.js          fases combinadas, provas do capítulo VI e o Colosso
+    lira.js            capítulo VII: muros rúnicos e Fios de Luz
     abbey.js           a Abadia Submersa (stealth)
-  effects.js           partículas, imagens residuais, anéis de eco
+  effects.js           partículas, imagens residuais (instanciadas), anéis de eco
   settings.js          opções salvas
   ui.js / style.css    interface (HUD, telas, menus)
   input.js             teclado, mouse (Pointer Lock) e controle (Gamepad API)

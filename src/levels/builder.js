@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SOLID, VEIL, KILL } from '../physics.js';
 import { boxGeometry, cloudTexture } from '../materials.js';
+import { PoolLight } from '../lights.js';
 
 export const A = -30; // fundo do abismo (oculto pela névoa)
 
@@ -149,6 +150,7 @@ export class LevelBuilder {
     this.hazards = [];
     this.goal = null;
     this.anchors = [];
+    this.zips = [];
     this.winds = [];
     this.phases = [];
     this.dimObjs = [];
@@ -164,7 +166,38 @@ export class LevelBuilder {
 
     def.build(this);
     this.mergeStatic();
+    this.singlePassGlows();
     this.reset();
+  }
+
+  // Junta as peças de um enfeite rígido (que flutua inteiro) numa malha por
+  // material, no espaço do próprio grupo: um trilho do céu com 25 dormentes
+  // vira 2 draw calls.
+  mergeGroup(g) {
+    g.updateMatrixWorld(true);
+    const inv = g.matrixWorld.clone().invert();
+    const m = new THREE.Matrix4();
+    const buckets = new Map();
+    const parts = [];
+    g.traverse((o) => {
+      if (o.isMesh && !Array.isArray(o.material)) parts.push(o);
+    });
+    for (const o of parts) {
+      let geo = o.geometry.clone().applyMatrix4(m.multiplyMatrices(inv, o.matrixWorld));
+      if (geo.index) geo = geo.toNonIndexed();
+      geo.clearGroups();
+      for (const name of Object.keys(geo.attributes)) if (name !== 'position' && name !== 'normal') geo.deleteAttribute(name);
+      const key = o.material.uuid + (o.castShadow ? ':c' : ':n');
+      if (!buckets.has(key)) buckets.set(key, { mat: o.material, cast: o.castShadow, geos: [] });
+      buckets.get(key).geos.push(geo);
+      o.parent.remove(o);
+    }
+    for (const b of buckets.values()) {
+      const mesh = new THREE.Mesh(mergeGeometries(b.geos, false), b.mat);
+      mesh.castShadow = b.cast;
+      g.add(mesh);
+    }
+    return g;
   }
 
   // Junta toda a geometria estática que usa materiais compartilhados em
@@ -345,7 +378,7 @@ export class LevelBuilder {
     mesh.position.set(cx, y, cz);
     mesh.rotation.y = rotY;
     this.group.add(mesh);
-    const light = new THREE.PointLight(0x4f9dff, 14, 10, 2);
+    const light = new PoolLight(0x4f9dff, 14, 10, 2);
     light.position.set(cx, y + h * 0.45, cz);
     this.group.add(light);
     const vb = { mesh, mat, light, collider, flash: 0, x: cx, y: y + h * 0.5, z: cz };
@@ -390,7 +423,7 @@ export class LevelBuilder {
     inner.position.y = 1.3;
     inner.scale.setScalar(0.55);
     g.add(outer, inner);
-    const light = new THREE.PointLight(0x6ab0ff, 2, 12, 2);
+    const light = new PoolLight(0x6ab0ff, 2, 12, 2);
     light.position.y = 2;
     g.add(light);
     this.group.add(g);
@@ -605,7 +638,17 @@ export class LevelBuilder {
       yaw: axis === 'z' ? 0 : s > 0 ? -Math.PI / 2 : Math.PI / 2,
     };
     const count = Math.ceil((L.startU - L.endU) / L.spacing) + 8;
+    // caixa com só dois grupos (laterais e topo): 2 draw calls em vez de 6
     const bodyGeo = boxGeometry(L.w, L.thick, L.len, 2);
+    const idx = bodyGeo.index.array;
+    const top = bodyGeo.groups[2];
+    const sides = [];
+    const topIdx = Array.from(idx.slice(top.start, top.start + top.count));
+    for (const g of bodyGeo.groups) if (g !== top) sides.push(...idx.slice(g.start, g.start + g.count));
+    bodyGeo.setIndex([...sides, ...topIdx]);
+    bodyGeo.clearGroups();
+    bodyGeo.addGroup(0, sides.length, 0);
+    bodyGeo.addGroup(sides.length, topIdx.length, 1);
     const glowParts = [];
     const under = new THREE.PlaneGeometry(L.w * 0.85, L.len * 0.85);
     under.rotateX(Math.PI / 2);
@@ -624,7 +667,7 @@ export class LevelBuilder {
       for (const n of Object.keys(ng.attributes)) if (n !== 'position') ng.deleteAttribute(n);
       return ng;
     }), false);
-    L.body = new THREE.InstancedMesh(bodyGeo, [this.M.slab, this.M.slab, this.M.floor, this.M.slab, this.M.slab, this.M.slab], count);
+    L.body = new THREE.InstancedMesh(bodyGeo, [this.M.slab, this.M.floor], count);
     L.glow = new THREE.InstancedMesh(glowGeo, this.M.slabGlow, count);
     for (const im of [L.body, L.glow]) {
       im.userData.dynamic = true;
@@ -758,19 +801,16 @@ export class LevelBuilder {
     }
   }
 
+  // Só as carruagens ativas entram no buffer (nas primeiras posições) e só
+  // esse trecho é enviado à GPU.
   drawLane(L) {
-    const m = this.laneMat ??= new THREE.Matrix4();
-    const q = this.laneQ ??= new THREE.Quaternion();
-    const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), L.yaw);
-    const qt = new THREE.Quaternion();
-    const ax = new THREE.Vector3(1, 0, 0);
-    const p = new THREE.Vector3();
-    const one = new THREE.Vector3(1, 1, 1);
-    const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
-    for (let i = 0; i < L.body.count; i++) {
-      L.body.setMatrixAt(i, hidden);
-      L.glow.setMatrixAt(i, hidden);
-    }
+    const D = (this.laneDraw ??= {
+      m: new THREE.Matrix4(), q: new THREE.Quaternion(), qy: new THREE.Quaternion(), qt: new THREE.Quaternion(),
+      up: new THREE.Vector3(0, 1, 0), ax: new THREE.Vector3(1, 0, 0), p: new THREE.Vector3(), one: new THREE.Vector3(1, 1, 1),
+    });
+    const { m, q, qy, qt, ax, p, one } = D;
+    qy.setFromAxisAngle(D.up, L.yaw);
+    let n = 0;
     for (const sl of L.slabs) {
       let jx = 0;
       let jy = 0;
@@ -785,11 +825,16 @@ export class LevelBuilder {
       p.x += jx;
       p.y = sl.y - L.thick / 2 + jy;
       m.compose(p, q, one);
-      L.body.setMatrixAt(sl.i, m);
-      L.glow.setMatrixAt(sl.i, m);
+      L.body.setMatrixAt(n, m);
+      L.glow.setMatrixAt(n, m);
+      n++;
     }
-    L.body.instanceMatrix.needsUpdate = true;
-    L.glow.instanceMatrix.needsUpdate = true;
+    for (const im of [L.body, L.glow]) {
+      im.count = n;
+      im.instanceMatrix.clearUpdateRanges();
+      im.instanceMatrix.addUpdateRange(0, n * 16);
+      im.instanceMatrix.needsUpdate = true;
+    }
   }
 
   resetLane(L) {
@@ -959,7 +1004,7 @@ export class LevelBuilder {
       g.add(pillar);
     }
     g.traverse((o) => { o.userData.dynamic = true; });
-    const light = new THREE.PointLight(0x7ab8ff, 24, 16, 2);
+    const light = new PoolLight(0x7ab8ff, 24, 16, 2);
     light.position.y = 2;
     g.add(light);
     this.group.add(g);
@@ -993,7 +1038,7 @@ export class LevelBuilder {
     this.block(minX - 0.6, maxY, z - 0.4, maxX + 0.6, maxY + 0.6, z + 0.4, M.trim, { uv: 1.5 });
     let pl = null;
     if (light) {
-      pl = new THREE.PointLight(0x4f9dff, 10, 10, 2);
+      pl = new PoolLight(0x4f9dff, 10, 10, 2);
       pl.position.set((minX + maxX) / 2, minY + h * 0.5, z + 0.5);
       this.group.add(pl);
     }
@@ -1100,6 +1145,7 @@ export class LevelBuilder {
       color: new THREE.Color(r, g, b), transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false,
     }));
     const add = (m, float = 0) => {
+      if (m.isGroup) this.mergeGroup(m);
       m.userData.dynamic = float > 0;
       this.group.add(m);
       if (float > 0) this.floater(m, float, 0.15 + rand() * 0.2, (rand() - 0.5) * 0.08);
@@ -1255,6 +1301,28 @@ export class LevelBuilder {
         r.rotation.z = (rand() - 0.5) * 0.6;
         add(r);
       }
+    } else if (ch === 6) {
+      // os caminhos de Lira: lanternas de papel em cachos e fitas douradas
+      const lantern = glow(2.2, 1.25, 0.4);
+      for (let i = 0; i < 6; i++) {
+        const [x, z] = around(22, 50);
+        const g = new THREE.Group();
+        g.position.set(x, 1 + rand() * 20, z);
+        for (let k = 0; k < 4; k++) {
+          const l = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.55, 1.0, 6), lantern);
+          l.position.set((rand() - 0.5) * 6, (rand() - 0.5) * 5, (rand() - 0.5) * 6);
+          g.add(l);
+        }
+        add(g, 0.7);
+      }
+      for (let i = 0; i < 3; i++) {
+        const band = new THREE.Mesh(new THREE.PlaneGeometry(radius * 3, 10, 24, 1), soft(2.0, 1.2, 0.35, 0.05));
+        const p = band.geometry.attributes.position;
+        for (let k = 0; k < p.count; k++) p.setY(k, p.getY(k) + Math.sin(p.getX(k) * 0.025 + i * 2) * 10);
+        band.position.set(cx, 95 + i * 16, cz - radius - i * 40);
+        band.rotation.x = 0.2;
+        add(band);
+      }
     } else if (ch === 5) {
       // além do Véu: anéis de luz e fitas de aurora
       for (let i = 0; i < 7; i++) {
@@ -1325,6 +1393,50 @@ export class LevelBuilder {
     const a = { pos: new THREE.Vector3(x, y, z), g, ring, core, halo, mat, hot: 0 };
     this.anchors.push(a);
     return a;
+  }
+
+  // Muro rúnico de Lira: no ar, encostando de lado nele, o andarilho corre
+  // pela parede (ver player.js). Runas douradas marcam onde dá.
+  runWall(minX, minY, minZ, maxX, maxY, maxZ, opts = {}) {
+    const m = this.block(minX, minY, minZ, maxX, maxY, maxZ, this.M.runWall, { uv: 2.5, ...opts });
+    m.userData.collider.runnable = true;
+    m.userData.collider.noGrab = true; // muro fino: não é para escalar pela borda
+    return m;
+  }
+
+  // Fio de Luz de (x0,y0,z0) a (x1,y1,z1): segure E perto dele para deslizar.
+  // postA/postB: altura dos postes sob cada ponta (0 = sem poste).
+  zipline(x0, y0, z0, x1, y1, z1, { postA = 0, postB = 0 } = {}) {
+    const a = new THREE.Vector3(x0, y0, z0);
+    const b = new THREE.Vector3(x1, y1, z1);
+    const len = a.distanceTo(b);
+    const dir = b.clone().sub(a).divideScalar(len);
+    const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, len, 6, 1), this.M.zip);
+    cable.position.copy(a).add(b).multiplyScalar(0.5);
+    cable.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    cable.castShadow = false;
+    this.group.add(cable);
+    for (const [p, h] of [[a, postA], [b, postB]]) {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.05, 6, 16), this.M.zip);
+      ring.position.copy(p);
+      ring.lookAt(p.x + dir.x, p.y + dir.y, p.z + dir.z);
+      ring.castShadow = false;
+      this.group.add(ring);
+      if (h > 0) {
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.15, h + 0.3, 6), this.M.iron);
+        post.position.set(p.x, p.y - h / 2 + 0.15, p.z);
+        post.castShadow = true;
+        this.group.add(post);
+      }
+    }
+    // conta de luz que corre pelo fio mostrando o sentido
+    const bead = new THREE.Mesh(new THREE.OctahedronGeometry(0.17, 0), this.M.zipBead);
+    bead.userData.dynamic = true;
+    bead.castShadow = false;
+    this.group.add(bead);
+    const z = { a, b, dir, len, bead, phase: Math.random() };
+    this.zips.push(z);
+    return z;
   }
 
   // Corrente de vento numa caixa: force = aceleração [x, y, z] (y > 26 levanta).
@@ -1496,7 +1608,7 @@ export class LevelBuilder {
       map: this.M.runeTex, color: new THREE.Color(1.4, 1.1, 0.6), transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false,
     })));
     mesh.add(halo);
-    const light = new THREE.PointLight(0xffd890, 6, 6, 2);
+    const light = new PoolLight(0xffd890, 6, 6, 2);
     mesh.add(light);
     mesh.traverse((o) => { o.userData.dynamic = true; });
     this.group.add(mesh);
@@ -1911,7 +2023,7 @@ export class LevelBuilder {
     horn.position.set(0, 3.8, -2.5);
     horn.rotation.x = -1.0;
     head.add(hood, face, ...eyes, horn);
-    const light = new THREE.PointLight(0xff3080, 40, 60, 1.5);
+    const light = new PoolLight(0xff3080, 40, 60, 1.5);
     light.position.set(0, 0, 6);
     head.add(light);
     for (const s of [-1, 1]) {
@@ -2075,6 +2187,11 @@ export class LevelBuilder {
   }
 
   updateMechanicVisuals(dt, time) {
+    for (const z of this.zips) {
+      const u = (time * 9 / z.len + z.phase) % 1;
+      z.bead.position.copy(z.a).addScaledVector(z.dir, u * z.len);
+      z.bead.rotation.y = time * 4;
+    }
     for (const a of this.anchors) {
       a.ring.rotation.y = time * 1.5;
       a.ring.rotation.x = Math.sin(time * 0.7) * 0.4;
@@ -2363,20 +2480,41 @@ export class LevelBuilder {
     return Math.hypot(dx, dz) < 1.9 && p.y > 0.3 && p.y < 3;
   }
 
+  // Libera geometrias e texturas próprias da fase. Os materiais NÃO são
+  // descartados: o shader compilado de cada um fica no cache do three.js e a
+  // próxima fase com o mesmo tipo de material não precisa recompilar.
   dispose() {
     this.scene.remove(this.group);
-    for (const mat of this.ownMats ?? []) mat.dispose();
     const shared = new Set(Object.values(this.M).filter((m) => m && m.isMaterial));
+    const sharedTex = new Set([this.M.runeTex]);
+    for (const m of shared) for (const v of Object.values(m)) if (v?.isTexture) sharedTex.add(v);
+    const seen = new Set();
+    const freeTex = (v) => {
+      if (v?.isTexture && !sharedTex.has(v)) v.dispose();
+    };
     this.group.traverse((o) => {
       if (o.geometry) o.geometry.dispose();
       const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
       for (const m of mats) {
-        if (shared.has(m)) continue;
-        if (m.map && m.map !== this.M.runeTex) m.map.dispose();
-        m.dispose();
+        if (shared.has(m) || seen.has(m)) continue;
+        seen.add(m);
+        for (const v of Object.values(m)) freeTex(v);
+        for (const u of Object.values(m.uniforms ?? {})) freeTex(u.value);
       }
     });
     for (const p of this.motePoints ?? []) this.effects.removeMotes(p);
+  }
+
+  // Brilhos aditivos de dois lados: o three.js desenha materiais transparentes
+  // DoubleSide em duas passadas (verso e frente), reavaliando o shader em
+  // cada uma. Somando luz, a ordem não importa: uma passada dá o mesmo visual.
+  singlePassGlows() {
+    this.group.traverse((o) => {
+      if (!o.material) return;
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+        if (m.transparent && m.side === THREE.DoubleSide && m.blending === THREE.AdditiveBlending && !m.depthWrite) m.forceSinglePass = true;
+      }
+    });
   }
 }
 

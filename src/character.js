@@ -3,11 +3,13 @@
 // simulado (Verlet com colisão contra o corpo), acessórios por manto (capuz,
 // chifres, coroa, máscara, ombreiras), rastro de luz e todas as animações:
 // parado, marcha, corrida, esgueirar, saltos, cambalhotas, rolamento, avanço,
-// deslize, gancho, surf, parede, borda e comemoração.
+// deslize, gancho, surf, parede, corrida na parede, fio de luz, borda e
+// comemoração.
 // A física fica em player.js; aqui só se lê o estado do jogador.
 import * as THREE from 'three';
 import { softTexture } from './materials.js';
 import { SKINS } from './skins.js';
+import { PoolLight } from './lights.js';
 
 const TAU = Math.PI * 2;
 const BODY_PIVOT = 0.9; // centro de massa: cambalhotas e inclinações giram aqui
@@ -620,10 +622,17 @@ export class Character {
     armBand.rotation.x = Math.PI / 2;
 
     // luz de preenchimento própria: o andarilho fica legível em qualquer cenário
-    this.fill = new THREE.PointLight(0xbcd2ff, 4.5, 5, 1.6);
+    this.fill = new PoolLight(0xbcd2ff, 4.5, 5, 1.6);
     this.fill.position.set(0.8, 2.3, 1.6);
     if (this.opts.light !== false) root.add(this.fill);
     Object.assign(this, { root, body, hips, spine, neck, head });
+    // peças pequenas não projetam sombra: somem no mapa de sombras e cada uma
+    // custaria mais uma chamada de desenho por quadro
+    root.traverse((o) => {
+      if (!o.isMesh || !o.castShadow) return;
+      o.geometry.computeBoundingSphere();
+      if (o.geometry.boundingSphere.radius * Math.max(o.scale.x, o.scale.y, o.scale.z) < 0.09) o.castShadow = false;
+    });
     for (const n of ['hips', 'spine', 'neck', 'head', 'legL', 'legR', 'kneeL', 'kneeR', 'armL', 'armR', 'elbowL', 'elbowR']) this[n].name = n;
     scene.add(root);
 
@@ -898,6 +907,45 @@ export class Character {
       s.kneeR = 0.95;
       s.headX = -0.2;
       kPose = 12;
+    } else if (P.state === 'wallrun') {
+      // corrida na parede: passadas rápidas com os pés na parede e o corpo
+      // inclinado para longe dela; a mão do lado da parede quase encosta
+      const side = P.wallSide ?? P.wallRunSide();
+      const sw2 = Math.sin(P.stepPhase);
+      const cw2 = Math.cos(P.stepPhase);
+      s.legL = sw2 * 1.05;
+      s.legR = -s.legL;
+      s.kneeL = 0.25 + Math.max(0, -cw2) * 1.6;
+      s.kneeR = 0.25 + Math.max(0, cw2) * 1.6;
+      s.bank = -side * 0.62;
+      s.lean = 0.22;
+      s.spineX = 0.18;
+      // braço do lado da parede aberto para ela; o outro balança
+      const wallArm = side > 0 ? 'R' : 'L';
+      const freeArm = side > 0 ? 'L' : 'R';
+      s['arm' + wallArm] = -0.9;
+      s['spread' + wallArm] = 1.25;
+      s['elbow' + wallArm] = -0.35;
+      s['arm' + freeArm] = -s.legL * 0.8;
+      s['spread' + freeArm] = 0.25;
+      s['elbow' + freeArm] = -1.2;
+      s.headY = side * 0.3;
+      s.headX = -0.2;
+      kPose = 18;
+    } else if (P.state === 'zip') {
+      // pendurado no fio: as duas mãos no alto, pernas encolhidas à frente
+      s.armL = -2.95;
+      s.armR = -3.0;
+      s.spreadL = s.spreadR = 0.12;
+      s.elbowL = s.elbowR = -0.12;
+      const sway = Math.sin(t * 3) * 0.08;
+      s.legL = -0.75 + sway;
+      s.legR = -0.4 - sway;
+      s.kneeL = 1.1;
+      s.kneeR = 0.7;
+      s.lean = -0.12;
+      s.headX = 0.05;
+      kPose = 12;
     } else if (P.surfing) {
       // surf: de lado, joelhos dobrados, braços abertos, inclinado na rampa
       const n = P.surfNormal;
@@ -1097,7 +1145,7 @@ export class Character {
     b.scale.setScalar(1);
 
     // brilho: avanço, gancho e carga do Véu nos olhos e nas runas
-    const glow = P.state === 'dash' ? 1.4 : P.state === 'swing' ? 0.25 : 0;
+    const glow = P.state === 'dash' ? 1.4 : P.state === 'swing' || P.state === 'zip' || P.state === 'wallrun' ? 0.3 : 0;
     this.cloakMat.emissiveIntensity = damp(this.cloakMat.emissiveIntensity, glow, 20, dt);
     const charge = clamp(P.veilCharge, 0, 1);
     this.eyeMat.color.copy(this.eyeBase).multiplyScalar(0.25 + 0.75 * charge * charge);
@@ -1135,7 +1183,7 @@ export class Character {
     }
 
     // rastro de luz da barra da capa
-    const fast = P.state === 'dash' || P.state === 'swing' || P.surfing || speed > 13;
+    const fast = P.state === 'dash' || P.state === 'swing' || P.state === 'zip' || P.state === 'wallrun' || P.surfing || speed > 13;
     this.trailAlpha = damp(this.trailAlpha, fast && this.root.visible ? 1 : 0, fast ? 8 : 3, dt);
     this.updateTrail();
 

@@ -21,6 +21,7 @@ import { loadSettings, saveSettings } from './settings.js';
 import { SKINS, skinById, skinUnlocked } from './skins.js';
 import { LORE, CHAPTERS, PROLOGUE_LINES } from './lore.js';
 import { Recorder, GhostRunner, Shadow, saveGhost, loadGhost } from './echo.js';
+import { LightPool } from './lights.js';
 
 // relógio simples por quadro (o THREE.Clock está obsoleto)
 class FrameClock {
@@ -44,8 +45,16 @@ const DEATH_COLOR = new THREE.Color(2.2, 0.3, 0.8);
 const RING_COLOR = new THREE.Color(2, 1.5, 0.4);
 const FRAG_COLOR = new THREE.Color(2.2, 1.7, 0.8);
 const VIOLET = new THREE.Color(1.4, 0.5, 2.6);
-const MUSIC_BY_CHAPTER = ['run', 'run', 'run', 'veu', 'final', 'veu'];
+const GOLD = new THREE.Color(2.4, 1.6, 0.5);
+// Fluxo: movimentos emendados sem parar no chão (ver flowMove)
+const FLOW_WINDOW = 2.2; // segundos para emendar o próximo movimento
+const FLOW_GROUND = 0.45; // parado no chão por mais que isso, a sequência acaba
+const MUSIC_BY_CHAPTER = ['run', 'run', 'run', 'veu', 'final', 'veu', 'lira'];
 const MENU_STATES = new Set(['title', 'select', 'options', 'wardrobe', 'memories', 'epilogue', 'credits', 'intro']);
+// estados calmos em que dá para montar uma fase escondida (compilar shaders)
+const WARM_STATES = new Set([...MENU_STATES, 'paused', 'finish']);
+// luzes pontuais reais por qualidade (ver lights.js)
+const LIGHT_SLOTS = { alta: 5, media: 4, baixa: 3 };
 
 function freshProgress() {
   return { best: {}, fragments: {}, feats: {}, skin: 'andarilho', speedrunBest: null, unlockAll: false };
@@ -75,8 +84,12 @@ export class Game {
     this.followMoon = s.followMoon;
     this.setEnv = s.setEnv;
     this.resizeAll = s.resize;
+    this.setRenderQuality = s.setQuality;
 
     this.materials = createMaterials(this.renderer);
+    this.lightPool = new LightPool(this.scene, LIGHT_SLOTS[this.settings?.quality] ?? 4);
+    this.lightFocus = new THREE.Vector3();
+    this.warmed = new Set();
     this.world = new PhysicsWorld();
     this.effects = new Effects(this.scene);
     this.player = new Player(this.scene, this.world);
@@ -104,7 +117,8 @@ export class Game {
     this.navRepeat = 0;
     this.speedrun = null;
     this.optionsReturn = 'select';
-    this.stats = { time: 0, deaths: 0, veils: 0, topSpeed: 0 };
+    this.stats = { time: 0, deaths: 0, veils: 0, topSpeed: 0, flow: 0 };
+    this.flow = { n: 0, t: 0, ground: 0 };
     this.move = new THREE.Vector3();
     this.fwd = new THREE.Vector3();
     this.right = new THREE.Vector3();
@@ -119,6 +133,7 @@ export class Game {
     this.wireEvents();
     this.loadLevel(0, true);
     this.openTitle();
+    this.warmShaders();
 
     this.clock = new FrameClock();
     this.frame = this.frame.bind(this);
@@ -183,7 +198,16 @@ export class Game {
       this.updateViewport();
     }
     this.bloom.enabled = q !== 'baixa';
+    // alta: MSAA 4x na cena e bloom inteiro; média: sem MSAA e bloom em meia resolução
+    this.setRenderQuality(q === 'alta' ? 4 : 0, q === 'alta' ? 1 : 0.5);
     this.moon.castShadow = q !== 'baixa';
+    this.lightPool.setSize(LIGHT_SLOTS[q] ?? 4);
+    // a qualidade muda os shaders (vagas de luz, sombra, alvo): recompila tudo nos menus
+    if (this.shaderQuality && this.shaderQuality !== q) {
+      this.warmed.clear();
+      this.warmShaders();
+    }
+    this.shaderQuality = q;
     const size = q === 'alta' ? 2048 : 1024;
     if (this.moon.shadow.mapSize.x !== size) {
       this.moon.shadow.mapSize.set(size, size);
@@ -227,13 +251,27 @@ export class Game {
       this.audio.wallJump();
       this.effects.sparks(p.pos.x - p.wallNx * 0.3, p.pos.y + 1, p.pos.z - p.wallNz * 0.3, 10, { speed: 2.5, life: 0.4, spread: 0.3 });
       this.cam.addShake(0.1);
+      this.flowMove('salto na parede');
+    };
+    p.onWallRun = () => {
+      this.audio.wallRun();
+      const w = p.wallRun;
+      this.effects.sparks(p.pos.x - w.nx * 0.4, p.pos.y + 0.6, p.pos.z - w.nz * 0.4, 16, { speed: 3, life: 0.5, spread: 0.4, color: GOLD, whiteChance: 0.3 });
+      this.flowMove('corrida na parede');
+    };
+    p.onZip = (z) => {
+      this.audio.zip();
+      this.effects.sparks(p.pos.x, p.pos.y + 1.4, p.pos.z, 18, { speed: 3, life: 0.5, color: GOLD, whiteChance: 0.3 });
+      this.flowMove('fio de luz');
     };
     p.onBounce = (c) => {
       this.audio.bounce();
       if (c.pad) c.pad.pulse = 1;
       this.effects.sparks(p.pos.x, p.pos.y + 0.2, p.pos.z, 30, { speed: 5, life: 0.6, gravity: 4, spread: 1, vy: 4 });
       this.cam.addShake(0.2);
+      this.flowMove('trampolim');
     };
+    p.onSurf = () => this.flowMove('surf');
     p.onJolt = () => {
       this.audio.crash();
       this.cam.addShake(0.6);
@@ -249,10 +287,12 @@ export class Game {
       this.audio.grapple();
       this.effects.sparks(a.pos.x, a.pos.y, a.pos.z, 20, { speed: 3, life: 0.5 });
       this.stats.grapples = (this.stats.grapples ?? 0) + 1;
+      this.flowMove('gancho');
     };
     p.onRelease = (jump) => {
       this.audio.release(jump);
       if (jump) this.effects.sparks(p.pos.x, p.pos.y + 1, p.pos.z, 12, { speed: 3, life: 0.4 });
+      if (jump || p.horizontalSpeed > 10) this.flowMove('lançamento');
     };
 
     const ui = this.ui;
@@ -318,6 +358,7 @@ export class Game {
     this.level.cameraPos = this.camera.position;
     this.level.fragmentTaken = !!this.progress.fragments[def.id];
     this.player.anchors = this.level.anchors;
+    this.player.zips = this.level.zips;
     this.level.onSlabCrash = (sl) => {
       if (sl.c === this.player.groundCol) return;
       const d = Math.hypot(sl.c.minX - this.player.pos.x, sl.c.minZ - this.player.pos.z);
@@ -336,6 +377,11 @@ export class Game {
         else if (st === 'suspicious' && prev !== 'chase') this.audio.alert('suspicious');
         else if (st === 'return') this.audio.alert('calm');
       };
+    }
+    // se a fase ainda não foi pré-compilada, ao menos compila tudo em paralelo
+    if (!this.warmed.has(index)) {
+      this.compileScene(this.scene);
+      this.warmed.add(index);
     }
     this.ghost.load(loadGhost(def.id));
     this.ui.setStealth(def.type === 'stealth');
@@ -363,7 +409,8 @@ export class Game {
     this.checkpoint = this.stealth ? this.level.checkpoints[0] ?? null : null;
     if (this.checkpoint) this.level.activateCheckpoint(this.checkpoint);
     const deaths = this.stats.deaths;
-    this.stats = { time: 0, deaths, veils: 0, topSpeed: 0, grapples: 0 };
+    this.stats = { time: 0, deaths, veils: 0, topSpeed: 0, grapples: 0, flow: 0 };
+    this.endFlow(true);
     this.veil.reset();
     this.effects.clear();
     this.bloom.strength = BLOOM_STRENGTH;
@@ -741,6 +788,42 @@ export class Game {
     this.effects.ring(p.pos.x, p.pos.y, p.pos.z, 7, 0.6, target === 1 ? VIOLET : undefined);
     this.effects.sparks(p.pos.x, p.pos.y + 1, p.pos.z, 20, { speed: 3, life: 0.5, color: target === 1 ? VIOLET : undefined });
     this.stats.shifts = (this.stats.shifts ?? 0) + 1;
+    if (!p.grounded) this.flowMove('outro lado');
+  }
+
+  // ------------------------------------------------------------- fluxo
+  // Cada movimento de parkour emendado no anterior (antes de FLOW_WINDOW e
+  // sem ficar parado no chão) aumenta a sequência: HUD, som cada vez mais
+  // agudo e o recorde da fase.
+  flowMove(name) {
+    if (this.state !== 'playing') return;
+    const f = this.flow;
+    f.n = f.t > 0 ? f.n + 1 : 1;
+    f.t = FLOW_WINDOW;
+    f.ground = 0;
+    this.stats.flow = Math.max(this.stats.flow ?? 0, f.n);
+    if (f.n >= 2) {
+      this.ui.setFlow(f.n, name);
+      this.audio.flow(f.n);
+    }
+  }
+
+  updateFlow(dt) {
+    const f = this.flow;
+    if (f.n === 0) return;
+    const p = this.player;
+    f.t -= dt;
+    f.ground = p.grounded && p.state === 'normal' ? f.ground + dt : 0;
+    if (f.t <= 0 || f.ground > FLOW_GROUND) this.endFlow();
+    else this.ui.setFlowTime(f.t / FLOW_WINDOW);
+  }
+
+  endFlow(silent = false) {
+    const f = this.flow;
+    if (!silent && f.n >= 6) this.ui.toast(`Fluxo ×${f.n}`, 1.4);
+    f.n = 0;
+    f.t = 0;
+    this.ui.setFlow(0);
   }
 
   bossEvent(type, a, b) {
@@ -809,6 +892,9 @@ export class Game {
     if (this.stats.deaths === 0) feats.noDeath = true;
     if (this.stats.veils === 0) feats.noVeil = true;
     feats.fragment = !!this.progress.fragments[def.id];
+    feats.flow = Math.max(feats.flow ?? 0, this.stats.flow ?? 0);
+    this.progress.flowBest = Math.max(this.progress.flowBest ?? 0, this.stats.flow ?? 0);
+    this.endFlow(true);
     this.progress.feats[def.id] = feats;
     const unlocks = SKINS.filter((s) => !before.has(s.id) && skinUnlocked(s, this.progress, this.levels)).map((s) => `manto ${s.name}`);
     this.saveProgress();
@@ -890,7 +976,63 @@ export class Game {
     requestAnimationFrame(this.frame);
     const dt = Math.min(this.clock.getDelta(), 0.05);
     this.tick(dt);
-    this.render();
+    this.render(dt);
+  }
+
+  // Compila em segundo plano, nos menus, os shaders de todas as fases (uma
+  // fase escondida por vez). Como os materiais das fases não são descartados,
+  // os shaders ficam no cache: entrar numa fase não trava mais o jogo.
+  async warmShaders() {
+    const run = (this.warmRun = (this.warmRun ?? 0) + 1);
+    const wait = (ms) => new Promise((res) => setTimeout(res, ms));
+    const fx = { addMotes: () => null, removeMotes() {}, sparks() {}, ring() {} };
+    const world = new PhysicsWorld();
+    // a sombra de objetos instanciados (carruagens) usa variantes do shader de
+    // profundidade que compileAsync não cobre: um objeto invisível desses
+    // projeta sombra por alguns quadros na tela de título
+    const geo = new THREE.BoxGeometry(0.01, 0.01, 0.01);
+    geo.addGroup(0, 30, 0);
+    geo.addGroup(30, 6, 1);
+    const probe = new THREE.InstancedMesh(geo, [this.materials.slab, this.materials.floor], 1);
+    probe.setMatrixAt(0, new THREE.Matrix4().makeScale(0, 0, 0));
+    const plain = new THREE.Mesh(geo, probe.material);
+    plain.scale.setScalar(0);
+    for (const o of [probe, plain]) {
+      o.castShadow = o.receiveShadow = true;
+      o.frustumCulled = false;
+      this.scene.add(o);
+    }
+    await this.compileScene(this.scene); // Sombra, fantasma e efeitos ainda ocultos
+    await wait(300);
+    this.scene.remove(probe, plain);
+    geo.dispose();
+    this.warmed.add(this.levelIndex); // a fase atual já está compilada
+    for (let i = 0; i < this.levels.length; i++) {
+      await wait(120);
+      while (!WARM_STATES.has(this.state)) await wait(400);
+      if (run !== this.warmRun) return; // a qualidade mudou: outra rodada assumiu
+      if (this.warmed.has(i)) continue;
+      const scene = new THREE.Scene();
+      world.clear();
+      const lv = new LevelBuilder({ scene, world, materials: this.materials, effects: fx }, this.levels[i]);
+      const guards = lv.guardianDefs.map((d) => new Guardian(scene, world, d));
+      await this.compileScene(scene);
+      for (const g of guards) g.dispose();
+      lv.dispose();
+      this.warmed.add(i);
+    }
+  }
+
+  // Compila sem desenhar (em paralelo, quando o navegador permite) com as
+  // luzes da cena principal e no mesmo alvo em que ela é desenhada.
+  compileScene(scene) {
+    const r = this.renderer;
+    if (!r.compileAsync) return Promise.resolve();
+    const prev = r.getRenderTarget();
+    r.setRenderTarget(this.bloom.enabled ? this.composer.readBuffer : null);
+    const p = r.compileAsync(scene, this.camera, this.scene);
+    r.setRenderTarget(prev);
+    return p;
   }
 
   // Qualidade automática: se os primeiros segundos de jogo ficarem lentos,
@@ -959,10 +1101,12 @@ export class Game {
     this.input.endFrame();
   }
 
-  render() {
+  render(dt = 1 / 60) {
     this.sky.position.copy(this.camera.position);
     this.sky.material.uniforms.uTime.value = this.time;
     this.followMoon(MENU_STATES.has(this.state) && this.state !== 'wardrobe' ? this.level.start.pos : this.player.pos);
+    this.camera.getWorldDirection(this.lightFocus).multiplyScalar(6).add(this.camera.position);
+    this.lightPool.update(this.lightFocus, dt);
     if (this.bloom.enabled) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
   }
@@ -1100,10 +1244,18 @@ export class Game {
     const target = p.state === 'swing' ? p.swing.anchor : p.findAnchor();
     for (const a of this.level.anchors) a.hot += ((a === target ? 1 : 0) - a.hot) * Math.min(1, dt * 12);
     const canGrab = target && p.state !== 'swing' && p.state !== 'hang' && p.state !== 'climb';
-    this.ui.setPrompt(canGrab ? `<kbd>${this.input.label('grapple')}</kbd> gancho` : null);
+    const canZip = p.state !== 'zip' && p.state !== 'hang' && p.state !== 'climb' && this.level.zips.length > 0 && p.findZip();
+    const key = `<kbd>${this.input.label('grapple')}</kbd>`;
+    this.ui.setPrompt(canZip ? `${key} fio de luz` : canGrab ? `${key} gancho` : null);
+    if (p.state === 'wallrun' && Math.random() < dt * 30) {
+      const w = p.wallRun;
+      this.effects.sparks(p.pos.x - w.nx * 0.45, p.pos.y + 0.3 + Math.random() * 1.2, p.pos.z - w.nz * 0.45, 1,
+        { speed: 1.2, life: 0.5, gravity: 1, size: 0.1, color: GOLD, whiteChance: 0.3, vx: -w.tx * 2, vz: -w.tz * 2 });
+    }
 
     for (const ev of this.level.triggers(p, this.veil)) {
       if (ev.type === 'ring') {
+        this.flowMove('anel');
         this.audio.ring();
         this.cam.addShake(0.25);
         this.slowmo = Math.max(this.slowmo, 0.1);
@@ -1171,6 +1323,7 @@ export class Game {
       return;
     }
 
+    this.updateFlow(dt);
     const speedK = this.cam.update(dt, p);
     this.ui.drawSpeedLines(speedK, dt);
     this.audio.setSpeed(speedK);

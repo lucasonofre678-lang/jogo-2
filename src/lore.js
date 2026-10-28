@@ -20,6 +20,7 @@ export const CHAPTERS = [
   { num: 'IV', name: 'O Outro Lado', text: 'Atrás do Véu existe um reflexo do mundo — e algo que conhece você.' },
   { num: 'V', name: 'O Coração do Véu', text: 'Tudo começou no santuário. Tudo termina no rasgo.' },
   { num: 'VI', name: 'Além do Véu', text: 'Depois da costura, fios soltos. Provas para quem quer ir além.' },
+  { num: 'VII', name: 'Os Fios de Lira', text: 'Lira corria pelos muros e deslizava nos fios de luz entre as torres. Os caminhos dela ainda brilham.' },
 ];
 
 // intro: frase ao começar a fase · memory: o fragmento escondido nela
@@ -131,6 +132,30 @@ export const LORE = {
   prova: {
     intro: 'A prova do Tecelão: tudo, ao mesmo tempo.',
     memory: 'Eu sou o Tecelão agora. E o Véu nunca mais vai rasgar.',
+  },
+  muros: {
+    intro: 'Os muros dourados por onde Lira corria. Ela nunca usava o chão.',
+    memory: 'Lira corria pelas paredes da Abadia como se a gravidade fosse só uma sugestão. Eu tentava acompanhar e caía.',
+  },
+  fios: {
+    intro: 'Fios de luz entre as torres. Lira os teceu numa primavera, para chegar mais rápido ao alto.',
+    memory: 'Ela dizia que o Véu era só um fio muito comprido. Que bastava não soltar.',
+  },
+  ziguezague: {
+    intro: 'De muro em muro, sem tocar o chão: o jogo favorito dela.',
+    memory: 'Contávamos os saltos sem pisar no chão. O recorde dela era vinte e sete. O meu, nove.',
+  },
+  tear: {
+    intro: 'O Tear do Céu: todos os fios de Lira se cruzam aqui.',
+    memory: 'Os monges chamavam este lugar de Tear. Lira chamava de casa.',
+  },
+  pegapega: {
+    intro: 'Pega-pega nos muros. Desta vez, quem corre atrás é a Sombra.',
+    memory: 'Ela sempre me deixava ganhar no final. Só agora eu percebi.',
+  },
+  ultimofio: {
+    intro: 'O último fio que Lira deixou. Ele leva para onde ela queria ir.',
+    memory: 'No fim do fio, um bilhete na letra dela: "Corre, que eu te espero do outro lado." Eu corro.',
   },
 };
 

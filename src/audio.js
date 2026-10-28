@@ -262,6 +262,29 @@ export class AudioSystem {
     this.tone({ type: 'sine', freq: 2349, peak: 0.06, attack: 0.003, decay: 0.4, delay: 0.04 });
   }
 
+  // corrida na parede: sopro subindo e um toque de runa
+  wallRun() {
+    this.burst({ type: 'bandpass', freq: 500, sweepTo: 1900, q: 0.9, peak: 0.09, attack: 0.02, decay: 0.3 });
+    this.tone({ type: 'triangle', freq: 392, to: 523, peak: 0.05, attack: 0.01, decay: 0.25, dest: this.echoIn });
+  }
+
+  // agarrar um Fio de Luz: zunido metálico
+  zip() {
+    this.tone({ type: 'triangle', freq: 880, to: 1760, peak: 0.07, attack: 0.005, decay: 0.18 });
+    this.tone({ type: 'sine', freq: 2349, peak: 0.04, attack: 0.005, decay: 0.7, dest: this.echoIn });
+    this.burst({ type: 'highpass', freq: 2500, q: 0.8, peak: 0.05, decay: 0.25 });
+  }
+
+  // Fluxo: um sino que sobe na escala pentatônica a cada movimento emendado
+  flow(n) {
+    const scale = [0, 2, 4, 7, 9];
+    const step = Math.min(n - 2, 14);
+    const semis = scale[step % 5] + 12 * Math.floor(step / 5);
+    const f = 523.25 * Math.pow(2, semis / 12);
+    this.tone({ type: 'sine', freq: f, peak: 0.045, attack: 0.004, decay: 0.45, dest: this.echoIn });
+    this.tone({ type: 'triangle', freq: f * 2, peak: 0.018, attack: 0.004, decay: 0.22 });
+  }
+
   wallJump() {
     this.burst({ type: 'bandpass', freq: 900, sweepTo: 2200, q: 1, peak: 0.08, attack: 0.005, decay: 0.12 });
     this.tone({ type: 'triangle', freq: 220, to: 330, peak: 0.06, decay: 0.1 });
@@ -307,7 +330,7 @@ export class AudioSystem {
     out.connect(this.musicBus);
     const duck = ctx.createGain();
     duck.connect(out);
-    this.mus = { style, step: 0, next: ctx.currentTime + 0.1, bpm: { calm: 80, veu: 128, final: 150 }[style] ?? 142, out, duck };
+    this.mus = { style, step: 0, next: ctx.currentTime + 0.1, bpm: { calm: 80, veu: 128, final: 150, lira: 136 }[style] ?? 142, out, duck };
     this.musTimer = setInterval(() => this.schedule(), 25);
   }
 
@@ -358,9 +381,11 @@ export class AudioSystem {
     const bar = Math.floor(step / 16);
     // i - VI - III - VII em lá menor
     // lá menor (padrão); ré menor no outro lado do Véu; mi menor no final
+    // Lira (capítulo VII): ré maior, I - V - vi - IV
     const PROG = m.style === 'veu' ? [[50, 53, 57], [46, 50, 53], [48, 52, 55], [45, 48, 52]]
       : m.style === 'final' ? [[52, 55, 59], [48, 52, 55], [50, 53, 57], [47, 50, 54]]
-        : [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];
+        : m.style === 'lira' ? [[62, 66, 69], [57, 61, 64], [59, 62, 66], [55, 59, 62]]
+          : [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];
     const chord = PROG[bar % 4];
     const hz = (n) => 440 * Math.pow(2, (n - 69) / 12);
     const { out, duck } = m;
@@ -405,6 +430,20 @@ export class AudioSystem {
       const ARP = [0, 1, 2, 1, 2, 0, 1, 2];
       const n = chord[ARP[s16 % 8]] + (s16 >= 8 ? 24 : 12);
       this.synth({ type: 'square', freq: hz(n), at: t, dur: sx * 0.9, peak: 0.028, cutoff: 2400, q: 2, dest: duck });
+    }
+    // tema de Lira: uma caixinha de música em colcheias (pentatônica de ré)
+    if (m.style === 'lira' && full && s16 % 2 === 0) {
+      const MEL = [
+        [81, 78, 76, 74, 76, 78, 81, 0],
+        [83, 81, 78, 76, 78, 76, 74, 0],
+        [81, 78, 76, 74, 71, 74, 76, 0],
+        [78, 76, 74, 71, 74, 0, 74, 0],
+      ];
+      const n = MEL[bar % 4][s16 / 2];
+      if (n) {
+        this.synth({ type: 'triangle', freq: hz(n), at: t, dur: sx * 3, peak: 0.03, cutoff: 3200, q: 1, dest: this.echoIn, attack: 0.004 });
+        this.synth({ type: 'sine', freq: hz(n + 12), at: t, dur: sx * 1.5, peak: 0.012, cutoff: 5000, q: 1, dest: out, attack: 0.002 });
+      }
     }
     // acorde longo no início de cada compasso
     if (s16 === 0 && full) {

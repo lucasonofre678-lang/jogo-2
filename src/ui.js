@@ -16,14 +16,15 @@ const CONTROLS = `
   <div class="controls">
     <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> correr · <kbd>Mouse</kbd> câmera</span>
     <span><kbd>Espaço</kbd> saltar · na parede: pulo na parede</span>
+    <span>No ar, encostado num <b>muro dourado</b>: corrida na parede</span>
     <span><kbd>Q</kbd> Passo do Véu (no ar também)</span>
     <span><kbd>C</kbd> correndo: deslizar · parado: esgueirar</span>
-    <span><kbd>E</kbd> segurar: Gancho do Véu</span>
+    <span><kbd>E</kbd> segurar: Gancho do Véu · Fio de Luz</span>
     <span><kbd>F</kbd> atravessar para o outro lado</span>
     <span><kbd>Shift</kbd> andar · <kbd>V</kbd> 1ª/3ª pessoa</span>
     <span><kbd>R</kbd> reiniciar · <kbd>Esc</kbd> pausa</span>
   </div>
-  <p class="small pad-hint">Controle: <b>A</b> saltar · <b>X</b>/<b>RB</b> Véu · <b>LB</b>/<b>RT</b> gancho · <b>Y</b> outro lado · <b>B</b>/<b>LT</b> deslizar · <b>Start</b> pausa</p>`;
+  <p class="small pad-hint">Controle: <b>A</b> saltar · <b>X</b>/<b>RB</b> Véu · <b>LB</b>/<b>RT</b> gancho e fio · <b>Y</b> outro lado · <b>B</b>/<b>LT</b> deslizar · <b>Start</b> pausa</p>`;
 
 export function formatTime(t) {
   if (t === null || t === undefined || !isFinite(t)) return '--:--.--';
@@ -90,6 +91,7 @@ export class UI {
           <div class="veil-text"><kbd>Q</kbd><span>Passo do Véu</span></div>
         </div>
         <div id="speed"><span id="speed-value">0</span><small>m/s</small></div>
+        <div id="flow"><div class="flow-n"></div><div class="flow-move"></div><div class="flow-bar"><i></i></div></div>
         <div id="boss" class="hidden"><div class="boss-name">O Colosso</div><div id="boss-runes"></div></div>
         <div id="dim" class="hidden"><kbd>F</kbd><span id="dim-label">Mundo real</span></div>
         <div id="frag-ind" title="fragmento de memória desta fase">◆</div>
@@ -260,6 +262,10 @@ export class UI {
     this.targetEl = this.$('target');
     this.levelLabel = this.$('level-label');
     this.speedEl = this.$('speed-value');
+    this.flowEl = this.$('flow');
+    this.flowN = this.flowEl.querySelector('.flow-n');
+    this.flowMove = this.flowEl.querySelector('.flow-move');
+    this.flowBar = this.flowEl.querySelector('.flow-bar i');
     this.splashEl = this.$('splash');
     this.dimEl = this.$('dim');
     this.fragEl = this.$('frag-ind');
@@ -418,6 +424,28 @@ export class UI {
     }
   }
 
+  // Fluxo: n movimentos emendados (menos de 2 esconde) e o último movimento.
+  setFlow(n, move = '') {
+    const el = this.flowEl;
+    if (n < 2) {
+      el.classList.remove('show', 'hot');
+      return;
+    }
+    this.flowN.textContent = `×${n}`;
+    this.flowMove.textContent = move;
+    el.classList.add('show');
+    el.classList.toggle('hot', n >= 8);
+    // reinicia a animação de "pulo" do número
+    el.classList.remove('pop');
+    void el.offsetWidth;
+    el.classList.add('pop');
+  }
+
+  // tempo que ainda resta para emendar o próximo movimento (0..1)
+  setFlowTime(k) {
+    this.flowBar.style.transform = `scaleX(${k.toFixed(3)})`;
+  }
+
   setSpeed(v) {
     const s = String(Math.round(v));
     if (this.speedEl.textContent !== s) this.speedEl.textContent = s;
@@ -571,7 +599,8 @@ export class UI {
       const mi = medalFor(best, def.medals);
       if (best !== null) done++;
       if (mi === 0) gold++;
-      const unlocked = i === 0 || progress.best[levels[i - 1].id] !== undefined || progress.unlockAll;
+      const unlocked = i === 0 || progress.best[levels[i - 1].id] !== undefined || progress.unlockAll
+        || (def.unlockAfter && progress.best[def.unlockAfter] !== undefined);
       const feats = progress.feats?.[def.id] ?? {};
       const frag = progress.fragments?.[def.id];
       const card = document.createElement('button');
@@ -624,7 +653,8 @@ export class UI {
     this.$('stats').innerHTML = `
       <div><span>${stats.deaths}</span>mortes</div>
       <div><span>${stats.veils}</span>Passos do Véu</div>
-      <div><span>${Math.round(stats.topSpeed)}</span>m/s máx.</div>`;
+      <div><span>${Math.round(stats.topSpeed)}</span>m/s máx.</div>
+      <div><span>×${stats.flow ?? 0}</span>fluxo máx.</div>`;
     this.$('finish-unlock').innerHTML = extra.unlocks?.length ? `Desbloqueado: <b>${extra.unlocks.join(', ')}</b>` : '';
     const next = this.$('next-btn');
     next.textContent = hasNext ? 'Próxima fase' : 'Escolher fase';
@@ -824,8 +854,14 @@ export class UI {
     const c = this.speedCtx;
     const w = this.speedCanvas.width;
     const h = this.speedCanvas.height;
+    // parado: só limpa uma vez (o canvas de tela cheia não é recomposto à toa)
+    if (k < 0.02) {
+      if (this.speedDrawn) c.clearRect(0, 0, w, h);
+      this.speedDrawn = false;
+      return;
+    }
     c.clearRect(0, 0, w, h);
-    if (k < 0.02) return;
+    this.speedDrawn = true;
     const cx = w / 2;
     const cy = h / 2;
     const maxR = Math.hypot(cx, cy);

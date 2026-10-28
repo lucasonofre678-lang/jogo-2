@@ -4,6 +4,7 @@
 // tecido e as mesmas animações do jogador.
 import * as THREE from 'three';
 import { Character } from './character.js';
+import { PoolLight } from './lights.js';
 
 const GHOST_KEY = 'veil.ghost.';
 const SAMPLE_DT = 0.05;
@@ -11,8 +12,11 @@ const MAX_SAMPLES = 20 * 60 * 10; // 10 minutos
 const STRIDE = 5; // x, y, z, direção, estado
 
 // estado gravado: 0 chão · 1 ar · 2 deslize · 3 gancho · 4 avanço · 5/6 surf
-// (rampa à esquerda/direita) · 7 borda · 8 esgueirando
+// (rampa à esquerda/direita) · 7 borda · 8 esgueirando · 9/10 corrida na
+// parede (parede à esquerda/direita) · 11 fio de luz
 function stateCode(p) {
+  if (p.state === 'wallrun') return p.wallRunSide() > 0 ? 10 : 9;
+  if (p.state === 'zip') return 11;
   if (p.state === 'slide') return 2;
   if (p.state === 'swing') return 3;
   if (p.state === 'dash') return 4;
@@ -37,6 +41,7 @@ class EchoState {
     this.sneaking = false;
     this.low = false;
     this.wallSliding = false;
+    this.wallSide = 1;
     this.celebrate = false;
     this.roll = 0;
     this.landSquash = 0;
@@ -69,7 +74,8 @@ class EchoState {
     this.facing = cur.f;
     const c = cur.code;
     const wasAir = !this.grounded;
-    this.state = c === 2 ? 'slide' : c === 3 ? 'swing' : c === 4 ? 'dash' : c === 7 ? 'hang' : 'normal';
+    this.state = c === 2 ? 'slide' : c === 3 ? 'swing' : c === 4 ? 'dash' : c === 7 ? 'hang' : c === 9 || c === 10 ? 'wallrun' : c === 11 ? 'zip' : 'normal';
+    this.wallSide = c === 10 ? 1 : -1;
     this.grounded = c === 0 || c === 2 || c === 8;
     this.sneaking = c === 8;
     this.surfing = c === 5 || c === 6;
@@ -91,7 +97,7 @@ class EchoState {
     }
     if (this.grounded && wasAir && this.vel.y < -6) this.landSquash = Math.min(1, -this.vel.y / 16);
     const hs = this.horizontalSpeed;
-    if (this.grounded && hs > 0.4) this.stepPhase += dt * (5 + Math.min(hs, 14) * 1.05);
+    if ((this.grounded || this.state === 'wallrun') && hs > 0.4) this.stepPhase += dt * (5 + Math.min(hs, 14) * 1.05);
   }
 }
 
@@ -196,7 +202,7 @@ class EchoFigure {
 export class GhostRunner {
   constructor(scene, world) {
     const body = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(0.3, 0.55, 1.15), transparent: true, opacity: 0.2, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      color: new THREE.Color(0.3, 0.55, 1.15), transparent: true, opacity: 0.2, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true,
     });
     const accent = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 1.2, 2.2), transparent: true, opacity: 0.6, depthWrite: false });
     const eye = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.5, 2.2, 3) });
@@ -239,10 +245,11 @@ export class GhostRunner {
 // --------------------------------------------------------------- a Sombra
 export class Shadow {
   constructor(scene, world) {
-    const body = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.03, 0.0, 0.035), transparent: true, opacity: 0.94, side: THREE.DoubleSide });
+    // opaca: transparente e de dois lados, o three.js a desenharia duas vezes
+    const body = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.03, 0.0, 0.035), side: THREE.DoubleSide });
     const accent = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 0.25, 0.9) });
     const eye = new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 0.4, 1.4) });
-    this.light = new THREE.PointLight(0xff3090, 0, 7, 2);
+    this.light = new PoolLight(0xff3090, 0, 7, 2);
     this.light.position.y = 1.4;
     this.fig = new EchoFigure(scene, world, { body, accent, eye }, this.light);
     this.trail = [];

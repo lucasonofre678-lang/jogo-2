@@ -194,6 +194,21 @@ h2 { margin: 0 0 12px; font-size: 44px; font-weight: 400; letter-spacing: 0.3em;
   font-family: 'Consolas', 'Menlo', monospace; color: #e8f0ff;
 }
 #speed-value { font-size: 34px; font-weight: 600; }
+
+/* Fluxo: movimentos emendados */
+#flow {
+  position: absolute; right: 30px; bottom: 82px; text-align: right; opacity: 0; transform: translateY(8px);
+  transition: opacity 0.25s, transform 0.25s; color: #ffe2a0;
+  text-shadow: 0 0 12px rgba(255, 170, 60, 0.85), 0 0 3px #000;
+}
+#flow.show { opacity: 1; transform: none; }
+#flow .flow-n { font-family: 'Consolas', 'Menlo', monospace; font-size: 30px; font-weight: 700; letter-spacing: 0.04em; }
+#flow .flow-move { font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase; color: #ffd27a; opacity: 0.85; }
+#flow .flow-bar { margin: 5px 0 0 auto; width: 92px; height: 3px; background: rgba(255, 210, 120, 0.18); border-radius: 2px; overflow: hidden; }
+#flow .flow-bar i { display: block; height: 100%; background: #ffcf6a; transform-origin: right center; box-shadow: 0 0 8px #ffb347; }
+#flow.pop .flow-n { animation: flowpop 0.32s ease-out; }
+#flow.hot .flow-n { color: #fff3d0; text-shadow: 0 0 18px rgba(255, 150, 40, 1), 0 0 40px rgba(255, 120, 40, 0.8); }
+@keyframes flowpop { 0% { transform: scale(1.45); } 100% { transform: scale(1); } }
 #speed small { font-size: 12px; color: var(--muted); margin-left: 4px; }
 
 #restart-tip { position: absolute; right: 30px; top: 22px; font-size: 12px; color: var(--muted); letter-spacing: 0.15em; }

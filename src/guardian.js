@@ -3,6 +3,7 @@
 //   patrol -> suspicious (investiga) -> chase (persegue) -> return (volta à rota)
 import * as THREE from 'three';
 import { PhysicsWorld, SOLID } from './physics.js';
+import { PoolLight } from './lights.js';
 
 export const VIEW_RANGE = 15;
 const HALF_FOV = THREE.MathUtils.degToRad(50);
@@ -86,6 +87,7 @@ export class Guardian {
     const robeMat = new THREE.MeshStandardMaterial({
       color: 0x1d2130, roughness: 1, flatShading: true, side: THREE.DoubleSide,
       emissive: new THREE.Color(0.02, 0.05, 0.14), transparent: true, opacity: 1,
+      forceSinglePass: true, // só fica translúcido ao se desfazer: uma passada basta
     });
     const darkMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true });
     this.glowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 2, 4) });
@@ -153,7 +155,7 @@ export class Guardian {
     cage.scale.y = 1.4;
     const core = add(new THREE.OctahedronGeometry(0.075, 0), this.glowMat, 0, 0, 0, lantern);
     core.scale.y = 1.4;
-    this.light = new THREE.PointLight(0x5fa8ff, 6, 11, 2);
+    this.light = new PoolLight(0x5fa8ff, 6, 11, 2);
     this.light.position.set(0.5, 1.0, 1.5);
     body.add(this.light);
     this.lantern = lantern;
@@ -181,7 +183,7 @@ export class Guardian {
     geo.setAttribute('color', new THREE.BufferAttribute(this.fanCol, 3).setUsage(THREE.DynamicDrawUsage));
     this.fanMat = new THREE.MeshBasicMaterial({
       vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
-      side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4,
+      side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, forceSinglePass: true,
     });
     this.fan = new THREE.Mesh(geo, this.fanMat);
     this.fan.frustumCulled = false;

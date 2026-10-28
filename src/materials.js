@@ -145,6 +145,76 @@ function roughTexture(seed, anisotropy) {
   return finish(c, anisotropy);
 }
 
+// Muro rúnico (dá para correr nele): lajes escuras com três faixas de runas
+// douradas. Devolve a cor e o mapa de brilho (só as runas acendem).
+function runWallTextures(seed, anisotropy) {
+  const S = 512;
+  const [c, g] = makeCanvas(S);
+  const [cg, gg] = makeCanvas(S);
+  const r = rng(seed);
+  g.fillStyle = '#23252d';
+  g.fillRect(0, 0, S, S);
+  gg.fillStyle = '#000';
+  gg.fillRect(0, 0, S, S);
+  // lajes altas
+  const cols = 3;
+  const bw = S / cols;
+  for (let x = 0; x < cols; x++) {
+    for (let y = 0; y < 2; y++) {
+      const s = 52 + r() * 22;
+      g.fillStyle = `rgb(${s | 0},${(s + 2) | 0},${(s + 9) | 0})`;
+      g.fillRect(x * bw + 4, y * (S / 2) + 4, bw - 8, S / 2 - 8);
+    }
+  }
+  addStains(g, S, r, 10, ['rgba(10,10,16,0.45)', 'rgba(70,60,40,0.18)']);
+  addCracks(g, S, r, 8);
+  addNoise(g, S, r, 26);
+  // faixas de runas: sulco escuro na cor, traço aceso no brilho
+  for (const by of [0.22, 0.5, 0.78]) {
+    const y0 = by * S;
+    g.fillStyle = 'rgba(8,8,12,0.75)';
+    g.fillRect(0, y0 - 16, S, 32);
+    gg.strokeStyle = '#fff';
+    gg.lineCap = 'round';
+    gg.lineWidth = 4;
+    gg.beginPath();
+    gg.moveTo(0, y0 - 13);
+    gg.lineTo(S, y0 - 13);
+    gg.moveTo(0, y0 + 13);
+    gg.lineTo(S, y0 + 13);
+    gg.stroke();
+    gg.lineWidth = 5;
+    for (let x = 16; x < S; x += 32) {
+      const k = Math.floor(r() * 4);
+      gg.beginPath();
+      if (k === 0) {
+        gg.moveTo(x - 7, y0 - 7);
+        gg.lineTo(x, y0 + 7);
+        gg.lineTo(x + 7, y0 - 7);
+      } else if (k === 1) {
+        gg.moveTo(x, y0 - 8);
+        gg.lineTo(x, y0 + 8);
+        gg.moveTo(x - 6, y0);
+        gg.lineTo(x + 6, y0);
+      } else if (k === 2) {
+        gg.moveTo(x - 6, y0 + 7);
+        gg.lineTo(x, y0 - 7);
+        gg.lineTo(x + 6, y0 + 7);
+      } else {
+        gg.moveTo(x - 7, y0);
+        gg.lineTo(x, y0 - 7);
+        gg.lineTo(x + 7, y0);
+        gg.lineTo(x, y0 + 7);
+        gg.closePath();
+      }
+      gg.stroke();
+    }
+  }
+  const glow = finish(cg, anisotropy);
+  glow.colorSpace = THREE.NoColorSpace;
+  return { map: finish(c, anisotropy), glow };
+}
+
 // Círculo arcano usado em decalques e no chão dos pontos de controle.
 export function runeTexture() {
   const S = 512;
@@ -232,6 +302,7 @@ export function createMaterials(renderer) {
   const brickDark = brickTexture(21, aniso);
   const flag = flagstoneTexture(3, aniso);
   const rough = roughTexture(11, aniso);
+  const runWall = runWallTextures(5, aniso);
 
   const std = (opts) => new THREE.MeshStandardMaterial({ roughness: 0.93, metalness: 0, ...opts });
 
@@ -259,6 +330,31 @@ export function createMaterials(renderer) {
       emissive: new THREE.Color(0.25, 0.05, 0.02), emissiveIntensity: 1 }),
     // energia corrompida do Véu: mata ao tocar
     blade: new THREE.MeshBasicMaterial({ color: new THREE.Color(2.6, 0.3, 0.95) }),
+    // muros rúnicos de Lira (corrida na parede) e os Fios de Luz
+    runWall: std({ map: runWall.map, bumpMap: runWall.map, bumpScale: 1.2, color: 0x9a9488,
+      emissive: new THREE.Color(1.05, 0.68, 0.2), emissiveMap: runWall.glow, emissiveIntensity: 1 }),
+    // cabo do Fio de Luz: luz que some perto da câmera (atrás do andarilho o
+    // fio passa rente à lente e viraria uma faixa larga na tela)
+    zip: new THREE.ShaderMaterial({
+      uniforms: { uColor: { value: new THREE.Color(1.15, 0.8, 0.3) } },
+      vertexShader: /* glsl */ `
+        varying float vDepth;
+        void main() {
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          vDepth = -mv.z;
+          gl_Position = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform vec3 uColor;
+        varying float vDepth;
+        void main() {
+          gl_FragColor = vec4(uColor * smoothstep(1.5, 5.0, vDepth), 1.0);
+        }
+      `,
+      transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    }),
+    zipBead: new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 1.7, 0.6) }),
     mistColor: new THREE.Color(0.35, 0.45, 0.75),
     runeTex: runeTexture(),
   };

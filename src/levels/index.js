@@ -5,6 +5,7 @@ import { fendas, gancho, ventos, ritmo, espelho, sombra, abismo, coracao } from 
 import { buildAbbey } from './abbey.js';
 import { surf1 } from './surf.js';
 import { surf2, labirinto, ancoras, prova, colosso } from './trials.js';
+import { muros, fios, ziguezague, tear, pegapega, ultimofio } from './lira.js';
 
 export const LEVELS = [
   // I — O Despertar
@@ -43,4 +44,11 @@ export const LEVELS = [
   { id: 'surf2', chapter: 5, name: 'Crista Partida', subtitle: 'Surf difícil: barras e os dois mundos', env: 'crepusculo', medals: [30, 36, 50], build: surf2, isNew: true },
   { id: 'ancoras', chapter: 5, name: 'Tempestade de Âncoras', subtitle: 'Gancho, vento e a Sombra', env: 'tempestade', medals: [22, 28, 40], build: ancoras, isNew: true },
   { id: 'prova', chapter: 5, name: 'Prova do Tecelão', subtitle: 'Todas as mecânicas, uma fase', env: 'aurora', medals: [48, 60, 80], build: prova, isNew: true },
+  // VII — Os Fios de Lira (corrida na parede e Fios de Luz)
+  { id: 'muros', chapter: 6, name: 'Muros de Lira', subtitle: 'Corra pelas paredes', env: 'poente', medals: [28, 36, 50], build: muros, isNew: true, unlockAfter: 'colosso' },
+  { id: 'fios', chapter: 6, name: 'Fios de Luz', subtitle: 'Deslize entre as torres', env: 'aurora', medals: [19, 24, 33], build: fios, isNew: true },
+  { id: 'ziguezague', chapter: 6, name: 'Zigue-Zague', subtitle: 'De muro em muro, sem tocar o chão', env: 'poente', medals: [36, 47, 64], build: ziguezague, isNew: true },
+  { id: 'tear', chapter: 6, name: 'O Tear do Céu', subtitle: 'Fios, âncoras, vento e muros', env: 'crepusculo', medals: [24, 31, 43], build: tear, isNew: true },
+  { id: 'pegapega', chapter: 6, name: 'Pega-Pega', subtitle: 'A Sombra corre nos muros', env: 'furia', medals: [19, 24, 33], build: pegapega, isNew: true },
+  { id: 'ultimofio', chapter: 6, name: 'O Último Fio', subtitle: 'Tudo o que Lira ensinou', env: 'poente', medals: [33, 42, 58], build: ultimofio, isNew: true },
 ];
