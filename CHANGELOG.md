@@ -1,5 +1,45 @@
 # Histórico de versões
 
+## v1.3 — Os Chefes
+
+**Chefes** (um no fim de cada capítulo; 39 fases no total)
+- I · **O Sineiro**: o grande sino solta ondas de choque pelo chão (pule) e
+  sinos menores caem onde você está; acenda as runas no alto dos pilares
+- II · **A Locomotiva**: um trem fantasma circula a ilha; embarque com ele
+  andando, abaixe-se (C) sob os arcos e acenda as runas nos vagões e na fornalha
+- III · **O Vendaval**: rajadas empurram para o abismo; abrigue-se atrás das
+  pedras, suba nas correntes de vento até as runas e fuja dos raios
+- IV · **O Reflexo**: o chão de um mundo apodrece de cada vez (troque com F),
+  a Sombra corre atrás de você e um gigante do outro lado imita cada gesto seu
+- VI · **O Eclipse**: longe da luz dos braseiros a escuridão consome; o sol
+  negro apaga os braseiros, e cada runa acesa vira uma luz nova
+- VII · **A Traça**: os muros dourados que você usa se desfazem e os que ela
+  marca somem por alguns segundos; toque as runas nos poleiros sob ela
+- Fases já concluídas continuam liberadas mesmo com os chefes novos no meio
+
+**Mais**
+- **Lira** corre à frente como um espírito dourado nas fases do capítulo VII
+  e espera quando você fica para trás
+- Final secreto: com todos os fragmentos, o epílogo ganha o reencontro com Lira
+- Tela inicial com o andarilho sentado olhando as ruínas
+- Diário: as vozes que você já ouviu aparecem nas Memórias, sob cada fase
+- Passos com o som de cada chão: pedra, muro dourado, vagão, cristal
+
+## v1.2 — Vozes do Véu
+
+**História**
+- Interlúdio de cinema ao abrir cada capítulo (barras, falas linha a linha,
+  câmera em volta do andarilho), uma vez por capítulo; dá para pular
+- Vozes no meio das fases: Lira, o Abade, a Sombra, as almas e o andarilho
+  (66 falas, duas por fase), com nome e cor de quem fala
+
+**Atmosfera**
+- Clima por ambiente, calculado na GPU: cinza caindo, chuva, brasas,
+  esporos, pólen dourado; desligado na qualidade baixa
+- Relâmpagos e trovões na tempestade
+- Sons de fundo por capítulo: sinos, apito do comboio, rajadas, sussurros,
+  batimento, cristais, carrilhão de vento
+
 ## v1.1 — Os Fios de Lira
 
 **Conteúdo**

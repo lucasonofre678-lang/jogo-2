@@ -6,6 +6,10 @@ import { buildAbbey } from './abbey.js';
 import { surf1 } from './surf.js';
 import { surf2, labirinto, ancoras, prova, colosso } from './trials.js';
 import { muros, fios, ziguezague, tear, pegapega, ultimofio } from './lira.js';
+import { sineiro, locomotiva, vendaval, reflexo, eclipse, traca } from './bosses.js';
+
+// chefe que fecha cada capítulo (o do V é o Colosso)
+const BOSS = { boss: true, music: 'final', isNew: true };
 
 export const LEVELS = [
   // I — O Despertar
@@ -14,11 +18,13 @@ export const LEVELS = [
   { id: 'laminas', chapter: 0, name: 'Lâminas do Véu', subtitle: 'Ritmo ou morte', env: 'furia', medals: [17, 23, 32], build: laminas },
   { id: 'corredor', chapter: 0, name: 'Corredor do Véu', subtitle: 'Paredes viram degraus', env: 'crepusculo', medals: [11, 15, 22], build: corredor },
   { id: 'desabamento', chapter: 0, name: 'Desabamento', subtitle: 'O Véu corrompido vem atrás', env: 'furia', medals: [20, 24, 28], build: desabamento },
+  { id: 'sineiro', chapter: 0, name: 'O Sineiro', subtitle: 'Chefe: o sino que acorda os mortos', env: 'noite', medals: [45, 70, 110], build: sineiro, ...BOSS },
   // II — A Ferrovia dos Mortos
   { id: 'comboio', chapter: 1, name: 'Comboio Espectral', subtitle: 'Carruagens que nunca param — até baterem', env: 'crepusculo', medals: [23, 28, 38], build: comboio },
   { id: 'travessia', chapter: 1, name: 'Travessia', subtitle: 'Rios de carruagens', env: 'aurora', medals: [15, 22, 32], build: travessia },
   { id: 'tempestade', chapter: 1, name: 'Tempestade', subtitle: 'Faixas que serpenteiam', env: 'tempestade', medals: [25, 31, 40], build: tempestade },
   { id: 'fuga', chapter: 1, name: 'Fuga', subtitle: 'O Véu é mais rápido que você', env: 'furia', medals: [24, 29, 36], build: fuga },
+  { id: 'locomotiva', chapter: 1, name: 'A Locomotiva', subtitle: 'Chefe: lute em cima do trem fantasma', env: 'crepusculo', medals: [50, 75, 120], build: locomotiva, ...BOSS },
   // III — Céu Partido
   { id: 'engrenagens', chapter: 2, name: 'Engrenagens', subtitle: 'Plataformas que não esperam', env: 'tempestade', medals: [20, 27, 38], build: engrenagens },
   { id: 'torre', chapter: 2, name: 'Torre da Maré', subtitle: 'Suba antes que a maré suba', env: 'tempestade', medals: [16, 20, 26], build: torre },
@@ -27,12 +33,14 @@ export const LEVELS = [
   { id: 'gancho', chapter: 2, name: 'Âncoras de Luz', subtitle: 'O Gancho do Véu', env: 'aurora', medals: [17, 22, 32], build: gancho },
   { id: 'ventos', chapter: 2, name: 'Ventos Uivantes', subtitle: 'Correntes que levantam e empurram', env: 'tempestade', medals: [17, 22, 32], build: ventos },
   { id: 'surf1', chapter: 2, name: 'Ondas de Luz', subtitle: 'Surf: deslize nas rampas', env: 'aurora', medals: [26, 32, 45], build: surf1, isNew: true },
+  { id: 'vendaval', chapter: 2, name: 'O Vendaval', subtitle: 'Chefe: o vento é o inimigo', env: 'tempestade', medals: [50, 75, 120], build: vendaval, ...BOSS },
   // IV — O Outro Lado
   { id: 'ritmo', chapter: 3, name: 'Respiração', subtitle: 'Pontes que pulsam', env: 'aurora', medals: [17, 22, 32], build: ritmo },
   { id: 'espelho', chapter: 3, name: 'O Outro Lado', subtitle: 'Dois mundos, uma tecla', env: 'noite', medals: [16, 21, 30], build: espelho },
   { id: 'sombra', chapter: 3, name: 'A Sombra', subtitle: 'Não pare', env: 'furia', medals: [17, 21, 28], build: sombra },
   { id: 'abismo', chapter: 3, name: 'Fundo do Mundo', subtitle: 'Gancho, vento e os dois lados', env: 'crepusculo', medals: [21, 27, 38], build: abismo },
   { id: 'labirinto', chapter: 3, name: 'Labirinto de Runas', subtitle: 'Portões, runas e os dois mundos', env: 'noite', medals: [24, 30, 42], build: labirinto, isNew: true },
+  { id: 'reflexo', chapter: 3, name: 'O Reflexo', subtitle: 'Chefe: o seu rosto do outro lado', env: 'noite', medals: [45, 70, 110], build: reflexo, ...BOSS },
   // V — O Coração do Véu
   {
     id: 'abadia', chapter: 4, name: 'Abadia Submersa', subtitle: 'Furtividade e o Artefato do Véu', env: 'noite', type: 'stealth', music: 'calm',
@@ -44,6 +52,7 @@ export const LEVELS = [
   { id: 'surf2', chapter: 5, name: 'Crista Partida', subtitle: 'Surf difícil: barras e os dois mundos', env: 'crepusculo', medals: [30, 36, 50], build: surf2, isNew: true },
   { id: 'ancoras', chapter: 5, name: 'Tempestade de Âncoras', subtitle: 'Gancho, vento e a Sombra', env: 'tempestade', medals: [22, 28, 40], build: ancoras, isNew: true },
   { id: 'prova', chapter: 5, name: 'Prova do Tecelão', subtitle: 'Todas as mecânicas, uma fase', env: 'aurora', medals: [48, 60, 80], build: prova, isNew: true },
+  { id: 'eclipse', chapter: 5, name: 'O Eclipse', subtitle: 'Chefe: não saia da luz', env: 'noite', medals: [40, 60, 95], build: eclipse, ...BOSS },
   // VII — Os Fios de Lira (corrida na parede e Fios de Luz)
   { id: 'muros', chapter: 6, name: 'Muros de Lira', subtitle: 'Corra pelas paredes', env: 'poente', medals: [28, 36, 50], build: muros, isNew: true, unlockAfter: 'colosso' },
   { id: 'fios', chapter: 6, name: 'Fios de Luz', subtitle: 'Deslize entre as torres', env: 'aurora', medals: [19, 24, 33], build: fios, isNew: true },
@@ -51,4 +60,5 @@ export const LEVELS = [
   { id: 'tear', chapter: 6, name: 'O Tear do Céu', subtitle: 'Fios, âncoras, vento e muros', env: 'crepusculo', medals: [24, 31, 43], build: tear, isNew: true },
   { id: 'pegapega', chapter: 6, name: 'Pega-Pega', subtitle: 'A Sombra corre nos muros', env: 'furia', medals: [19, 24, 33], build: pegapega, isNew: true },
   { id: 'ultimofio', chapter: 6, name: 'O Último Fio', subtitle: 'Tudo o que Lira ensinou', env: 'poente', medals: [33, 42, 58], build: ultimofio, isNew: true },
+  { id: 'traca', chapter: 6, name: 'A Traça', subtitle: 'Chefe: ela come os caminhos de Lira', env: 'poente', medals: [45, 65, 100], build: traca, ...BOSS },
 ];

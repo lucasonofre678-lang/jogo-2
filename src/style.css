@@ -108,7 +108,7 @@ kbd {
 #hint.show { opacity: 1; transform: translate(-50%, 0); }
 
 #toast {
-  position: absolute; top: 96px; left: 50%; transform: translateX(-50%);
+  position: absolute; top: 96px; left: 50%; transform: translateX(-50%); white-space: nowrap;
   font-size: 14px; letter-spacing: 0.35em; text-transform: uppercase; color: var(--veil-strong);
   text-shadow: 0 0 12px rgba(80, 160, 255, 0.9);
   opacity: 0; transition: opacity 0.5s;
@@ -194,6 +194,18 @@ h2 { margin: 0 0 12px; font-size: 44px; font-weight: 400; letter-spacing: 0.3em;
   font-family: 'Consolas', 'Menlo', monospace; color: #e8f0ff;
 }
 #speed-value { font-size: 34px; font-weight: 600; }
+
+/* Sussurros: as vozes da história */
+#whisper {
+  position: absolute; left: 50%; top: 15vh; transform: translate(-50%, -6px); max-width: min(680px, 86vw);
+  text-align: center; opacity: 0; transition: opacity 0.9s, transform 0.9s; --voice: #bcd6ff;
+}
+#whisper.show { opacity: 1; transform: translate(-50%, 0); }
+#whisper .w-who {
+  font-size: 11px; letter-spacing: 0.32em; text-transform: uppercase; color: var(--voice);
+  text-shadow: 0 0 10px var(--voice), 0 0 3px #000; margin-bottom: 6px;
+}
+#whisper .w-text { font-size: 19px; font-style: italic; line-height: 1.45; color: #eef2ff; text-shadow: 0 0 14px #000, 0 0 3px #000; }
 
 /* Fluxo: movimentos emendados */
 #flow {
@@ -439,6 +451,9 @@ button.focus, input.focus { outline: 2px solid var(--veil-strong); outline-offse
 #boss-runes { display: flex; justify-content: center; gap: 14px; margin-top: 4px; font-size: 22px; }
 #boss-runes i { font-style: normal; color: rgba(255, 120, 160, 0.3); }
 #boss-runes i.on { color: #ffd76a; text-shadow: 0 0 12px rgba(255, 200, 90, 0.9); }
+/* com o HUD do chefe no alto, avisos e vozes descem um pouco */
+#boss:not(.hidden) ~ #toast { top: 136px; max-width: 80vw; text-align: center; line-height: 1.6; }
+#boss:not(.hidden) ~ #whisper { top: calc(15vh + 84px); }
 /* opções: teclas */
 .opt-head { margin-top: 12px; font-size: 12px; letter-spacing: 0.25em; text-transform: uppercase; color: var(--veil-strong); text-align: left; }
 .opt-btn.key { font-family: 'Consolas', monospace; }
@@ -473,6 +488,10 @@ button.focus, input.focus { outline: 2px solid var(--veil-strong); outline-offse
 #intro-text { position: absolute; left: 0; right: 0; bottom: 15vh; text-align: center; }
 #intro-text p { margin: 8px auto; max-width: 760px; font-size: 21px; font-style: italic; line-height: 1.5; color: #f0f4ff; text-shadow: 0 0 12px #000;
   opacity: 0; animation: rise 1.4s ease-out forwards; }
+.mem-voice { margin: 2px 0 2px 28px; font-size: 13px; font-style: italic; color: var(--muted); text-align: left; }
+.mem-voice span { font-style: normal; font-size: 10px; letter-spacing: 0.25em; text-transform: uppercase; margin-right: 8px; }
+#epilogue-text p.secret { color: #ffe3a6; text-shadow: 0 0 14px rgba(255, 180, 80, 0.6); }
+#intro-text p .cine-ch { display: block; font-style: normal; font-size: 13px; letter-spacing: 0.35em; text-transform: uppercase; color: var(--muted); }
 #intro-skip { position: absolute; right: 22px; bottom: calc(11vh + 14px); font-size: 11px; letter-spacing: 0.25em; color: var(--muted); }
 
 /* modo capa (só desenvolvimento): esconde o que não é título */

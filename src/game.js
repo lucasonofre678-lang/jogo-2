@@ -19,8 +19,10 @@ import { Input } from './input.js';
 import { AudioSystem } from './audio.js';
 import { loadSettings, saveSettings } from './settings.js';
 import { SKINS, skinById, skinUnlocked } from './skins.js';
-import { LORE, CHAPTERS, PROLOGUE_LINES } from './lore.js';
-import { Recorder, GhostRunner, Shadow, saveGhost, loadGhost } from './echo.js';
+import { LORE, CHAPTERS, PROLOGUE_LINES, VOICES, WHISPERS } from './lore.js';
+import { Weather } from './weather.js';
+import { Recorder, GhostRunner, Shadow, LiraGuide, saveGhost, loadGhost } from './echo.js';
+import { LIRA_ROUTES, LIRA_DT } from './levels/liraRoutes.js';
 import { LightPool } from './lights.js';
 
 // relógio simples por quadro (o THREE.Clock está obsoleto)
@@ -50,6 +52,10 @@ const GOLD = new THREE.Color(2.4, 1.6, 0.5);
 const FLOW_WINDOW = 2.2; // segundos para emendar o próximo movimento
 const FLOW_GROUND = 0.45; // parado no chão por mais que isso, a sequência acaba
 const MUSIC_BY_CHAPTER = ['run', 'run', 'run', 'veu', 'final', 'veu', 'lira'];
+// sons de fundo de cada capítulo (ver audio.setAmbience)
+const AMBIENCE_BY_CHAPTER = ['sinos', 'trilhos', 'vento', 'sussurros', 'coracao', 'cristal', 'carrilhao'];
+// quantidade de partículas de clima por qualidade
+const WEATHER_DENSITY = { alta: 1, media: 0.5, baixa: 0 };
 const MENU_STATES = new Set(['title', 'select', 'options', 'wardrobe', 'memories', 'epilogue', 'credits', 'intro']);
 // estados calmos em que dá para montar uma fase escondida (compilar shaders)
 const WARM_STATES = new Set([...MENU_STATES, 'paused', 'finish']);
@@ -92,6 +98,10 @@ export class Game {
     this.warmed = new Set();
     this.world = new PhysicsWorld();
     this.effects = new Effects(this.scene);
+    this.weather = new Weather(this.scene, this.effects.scaleUniform);
+    this.lightning = 0;
+    this.lightningT = 4;
+    this.whispered = new Set();
     this.player = new Player(this.scene, this.world);
     this.effects.initGhosts(this.player.root);
     this.cam = new CameraController(this.camera, this.world);
@@ -102,6 +112,7 @@ export class Game {
     this.recorder = new Recorder();
     this.ghost = new GhostRunner(this.scene, this.world);
     this.shadow = new Shadow(this.scene, this.world);
+    this.lira = new LiraGuide(this.scene, this.world);
     this.guardians = [];
     this.level = null;
     this.levels = LEVELS;
@@ -144,7 +155,10 @@ export class Game {
       // atalhos de desenvolvimento: ?play=<id da fase> · ?screen=select|wardrobe|memories|options · ?run=1 (segura W)
       const q = new URLSearchParams(location.search);
       const i = this.levels.findIndex((l) => l.id === q.get('play'));
-      if (i >= 0) this.playLevel(i);
+      if (i >= 0) {
+        this.fromCinematic = true; // atalho de teste: direto na fase, sem interlúdio
+        this.playLevel(i);
+      }
       const scr = q.get('screen');
       if (scr === 'select') this.openSelect();
       else if (scr === 'wardrobe') this.openWardrobe();
@@ -202,6 +216,7 @@ export class Game {
     this.setRenderQuality(q === 'alta' ? 4 : 0, q === 'alta' ? 1 : 0.5);
     this.moon.castShadow = q !== 'baixa';
     this.lightPool.setSize(LIGHT_SLOTS[q] ?? 4);
+    this.weather.setDensity(WEATHER_DENSITY[q] ?? 0.5);
     // a qualidade muda os shaders (vagas de luz, sombra, alvo): recompila tudo nos menus
     if (this.shaderQuality && this.shaderQuality !== q) {
       this.warmed.clear();
@@ -239,7 +254,11 @@ export class Game {
       if (this.stealth) this.emitNoise(p.pos.x, p.pos.y + 1, p.pos.z, 2 + k * 10, 0.04 + k * 0.32);
     };
     p.onStep = (kind) => {
-      this.audio.step(kind);
+      const c = p.groundCol;
+      const surface = p.state === 'wallrun' ? 'rune'
+        : c && this.level.dimObjs.some((o) => o.c === c) ? 'crystal'
+          : c && (c.vx || c.vz) ? 'wood' : 'stone';
+      this.audio.step(kind, surface);
       if (kind === 'run' && Math.random() < 0.35) this.effects.dust(p.pos.x, p.pos.y, p.pos.z, 2, 0.3);
       if (!this.stealth) return;
       if (kind === 'run') this.emitNoise(p.pos.x, p.pos.y + 1, p.pos.z, 8, 0.12);
@@ -353,6 +372,8 @@ export class Game {
     this.levelIndex = index;
     const def = this.levelDef;
     this.applyEnv(def.env);
+    this.whispered.clear();
+    this.audio.setAmbience(AMBIENCE_BY_CHAPTER[def.chapter ?? 0]);
     this.level = new LevelBuilder({ scene: this.scene, world: this.world, materials: this.materials, effects: this.effects }, def);
     this.level.playerRef = this.player;
     this.level.cameraPos = this.camera.position;
@@ -384,8 +405,9 @@ export class Game {
       this.warmed.add(index);
     }
     this.ghost.load(loadGhost(def.id));
+    this.lira.load(LIRA_ROUTES[def.id] ?? null, LIRA_DT);
     this.ui.setStealth(def.type === 'stealth');
-    this.ui.setBoss(def.boss ? 0 : null, this.level.boss?.runes.length ?? 0);
+    this.ui.setBoss(def.boss ? 0 : null, this.level.boss?.runes.length ?? 0, this.level.boss?.name ?? 'O Colosso');
     this.ui.setFragment(!!this.level.fragment, this.progress.fragments[def.id]);
     this.stats.deaths = 0;
     this.restartLevel();
@@ -402,6 +424,63 @@ export class Game {
   applyEnv(name) {
     const env = this.setEnv(name);
     this.materials.mistColor.setRGB(...(env.mist ?? ENVS.noite.mist));
+    this.weather.setKind(name);
+    this.envName = name;
+    this.envDef = env;
+    this.lightning = 0;
+  }
+
+  // Relâmpagos na tempestade: o luar e a exposição piscam e o trovão vem depois.
+  updateLightning(dt) {
+    if (this.envName !== 'tempestade') return;
+    this.lightningT -= dt;
+    if (this.lightningT <= 0) {
+      this.lightningT = 6 + Math.random() * 9;
+      this.lightning = 1;
+      this.lightningFlicker = Math.random() < 0.6 ? 0.18 : 0;
+      this.audio.thunder(0.4 + Math.random() * 1.4);
+    }
+    if (this.lightningFlicker > 0) {
+      this.lightningFlicker -= dt;
+      if (this.lightningFlicker <= 0) this.lightning = 0.8;
+    }
+    if (this.lightning <= 0.001) return;
+    this.lightning *= Math.exp(-dt * 7);
+    const e = this.envDef;
+    this.moon.intensity = e.moonI * (1 + this.lightning * 4);
+    this.renderer.toneMappingExposure = e.exposure * (1 + this.lightning * 0.95);
+  }
+
+  // Sussurros: falas da história em pontos da fase (ver lore.js).
+  updateWhispers() {
+    const list = WHISPERS[this.levelDef.id];
+    if (!list || this.whispered.size >= list.length) return;
+    const lv = this.level;
+    const p = this.player.pos;
+    const a = lv.start.pos;
+    const g = lv.goal?.pos ?? lv.artifact?.home;
+    let prog = 0;
+    if (g) {
+      const dx = g.x - a.x;
+      const dy = g.y - a.y;
+      const dz = g.z - a.z;
+      const len2 = dx * dx + dy * dy + dz * dz;
+      if (len2 > 1) prog = ((p.x - a.x) * dx + (p.y - a.y) * dy + (p.z - a.z) * dz) / len2;
+    }
+    for (let i = 0; i < list.length; i++) {
+      if (this.whispered.has(i)) continue;
+      const [at, who, text] = list[i];
+      if (at > 1 ? this.stats.time >= at : prog >= at) {
+        this.whispered.add(i);
+        this.ui.whisper(VOICES[who], text);
+        const heard = (this.progress.heard ??= {});
+        if (!((heard[this.levelDef.id] ?? 0) & (1 << i))) {
+          heard[this.levelDef.id] = (heard[this.levelDef.id] ?? 0) | (1 << i);
+          this.saveProgress();
+        }
+        return;
+      }
+    }
   }
 
   restartLevel() {
@@ -426,6 +505,7 @@ export class Game {
     if (this.levelDef.intro) this.ui.showHint(this.levelDef.intro, 6);
     this.respawn(this.level.start.pos, this.level.start.yaw);
     this.recorder.start();
+    this.lira.reset();
     if (this.level.shadowDelay) this.shadow.start(this.level.shadowDelay);
     else this.shadow.stop();
     if (this.state === 'dead' || this.state === 'captured' || this.state === 'finish') this.setState('playing');
@@ -457,6 +537,8 @@ export class Game {
     this.cam.snap(this.player.pos, yaw);
     for (const g of this.guardians) g.reset();
     this.veil.cooldown = 0;
+    this.level?.boss?.onRespawn?.();
+    this.lira?.seek(pos.z + 6);
   }
 
   saveProgress() {
@@ -523,15 +605,26 @@ export class Game {
 
   // Abertura: o andarilho acorda enquanto o prólogo aparece.
   startIntro() {
+    this.startCinematic(0, { wake: true });
+  }
+
+  // Interlúdio de capítulo: barras de cinema, as falas do capítulo linha a
+  // linha e a câmera girando em volta do andarilho; depois a fase começa.
+  startCinematic(index, { wake = false } = {}) {
     this.audio.init();
+    this.player.sitting = false;
     document.activeElement?.blur?.();
-    this.loadLevel(0, true);
+    const ch = this.levels[index].chapter ?? 0;
+    const lines = CHAPTERS[ch].lines ?? PROLOGUE_LINES;
+    this.loadLevel(index, true);
     this.audio.startMusic('calm');
     this.setState('intro');
     this.ui.showScreen(null);
     this.ui.hud.classList.add('hidden');
-    this.ui.showIntro(PROLOGUE_LINES);
-    this.player.wake = 1;
+    const head = `<span class="cine-ch">Capítulo ${CHAPTERS[ch].num} — ${CHAPTERS[ch].name}</span>`;
+    this.ui.showIntro(wake ? lines : [head, ...lines]);
+    this.cine = { index, ch, wake, end: 2.4 + (lines.length + (wake ? 0 : 1)) * 2.6 };
+    this.player.wake = wake ? 1 : 0;
     this.introAngle = this.player.facing + 2.2;
   }
 
@@ -539,9 +632,10 @@ export class Game {
     const p = this.player;
     const t = this.stateTime;
     const skip = this.input.wasPressed('Space') || this.input.wasPressed('Enter') || this.input.padPressed.has(0) || this.input.wasPressed('Escape');
-    const END = 11.5;
+    const c = this.cine;
+    const END = c.end;
     if (skip && t < END - 1.6) this.stateTime = END - 1.6;
-    if (t > END - 2.2) p.wake = Math.max(0, p.wake - realDt / 1.6);
+    if (c.wake && t > END - 2.2) p.wake = Math.max(0, p.wake - realDt / 1.6);
     this.level.update(dt, this.time);
     p.vel.set(0, 0, 0);
     p.grounded = true;
@@ -557,9 +651,11 @@ export class Game {
     if (t > END) {
       p.wake = 0;
       this.ui.hideIntro();
-      this.progress.introSeen = true;
+      if (c.wake) this.progress.introSeen = true;
+      this.progress.interludes = { ...(this.progress.interludes ?? {}), [c.ch]: true };
       this.saveProgress();
-      this.playLevel(0);
+      this.fromCinematic = true;
+      this.playLevel(c.index);
     }
   }
 
@@ -675,9 +771,18 @@ export class Game {
 
   playLevel(i) {
     this.audio.init();
+    this.player.sitting = false;
     const def = this.levels[i];
     const first = this.levels.findIndex((d) => (d.chapter ?? 0) === (def.chapter ?? 0)) === i;
-    if (first && !this.speedrun) this.pendingChapter = CHAPTERS[def.chapter ?? 0];
+    const ch = def.chapter ?? 0;
+    const cine = this.fromCinematic;
+    this.fromCinematic = false;
+    const seen = this.progress.interludes?.[ch] || (ch === 0 && this.progress.introSeen);
+    if (first && !this.speedrun && !cine && !seen && CHAPTERS[ch].lines) {
+      this.startCinematic(i);
+      return;
+    }
+    if (first && !this.speedrun && !cine) this.pendingChapter = CHAPTERS[ch];
     document.activeElement?.blur?.();
     this.player.celebrate = false;
     this.loadLevel(i);
@@ -842,18 +947,27 @@ export class Game {
       this.audio.alert('chase');
       this.ui.toast(type === 'sweepLow' ? 'Braço baixo — pule!' : 'Braço alto — deslize!', 1.3);
     } else if (type === 'hit') {
+      const name = this.level.boss?.name ?? 'O Colosso';
       this.audio.rune();
       this.audio.capture();
       this.cam.addShake(0.7);
       this.ui.flash(0.6);
-      this.ui.setBoss(a, b);
-      this.ui.toast(a < b ? `O Colosso cambaleia — ${a}/${b}` : 'O Colosso cai!', 2);
+      this.ui.setBoss(a, b, name);
+      this.ui.toast(a < b ? `${name} cambaleia — ${a}/${b}` : `${name} cai!`, 2);
       this.slowmo = 0.5;
+    } else if (type === 'toast') {
+      this.ui.toast(a, b ?? 1.4);
+    } else if (type === 'shake') {
+      this.cam.addShake(a);
+    } else if (type === 'sfx') {
+      this.audio[a]?.(b);
+    } else if (type === 'flash') {
+      this.ui.flash(a, b);
     } else if (type === 'defeat') {
       this.audio.artifact();
       this.ui.flash(1.6);
       this.cam.addShake(1);
-      this.ui.showHint('O rasgo está aberto. Entre no portal e <b>costure o Véu</b>.', 8);
+      this.ui.showHint(this.levelDef.final ? 'O rasgo está aberto. Entre no portal e <b>costure o Véu</b>.' : 'O caminho está livre. Entre no <b>portal</b>.', 8);
       const g = this.level.goal?.pos;
       if (g) this.effects.sparks(g.x, g.y + 2, g.z, 200, { speed: 8, life: 1.6, gravity: 1, size: 0.15, whiteChance: 0.5 });
     }
@@ -902,6 +1016,7 @@ export class Game {
     this.finishFocus = this.player.pos.clone();
     this.player.celebrate = true;
     this.shadow.stop();
+    this.lira.hide();
     this.ui.setDanger(0);
     this.ui.setPrompt(null);
     this.audio.finish();
@@ -935,11 +1050,18 @@ export class Game {
     this.input.unlock();
     this.finishArgs = [def, this.levelIndex, this.levels.length, time, this.progress.best[def.id], isRecord, this.stats, hasNext,
       { prevBest: prev ?? null, feats, hasFragment: !!this.level.fragment, unlocks }];
-    if (def.final) {
+    // todos os fragmentos: o reencontro com Lira (no Colosso, ou ao fechar o jogo)
+    const allFragments = this.levels.every((d) => this.progress.fragments[d.id]);
+    const lastLevel = this.levelIndex === this.levels.length - 1;
+    if (def.final || (allFragments && lastLevel && !this.progress.secretSeen)) {
+      if (allFragments) {
+        this.progress.secretSeen = true;
+        this.saveProgress();
+      }
       this.applyEnv('amanhecer');
       this.bloom.strength = BLOOM_STRENGTH * 1.4;
       this.setState('epilogue');
-      this.ui.showEpilogue();
+      this.ui.showEpilogue(allFragments, !def.final);
       return;
     }
     this.ui.showFinish(...this.finishArgs);
@@ -1096,7 +1218,10 @@ export class Game {
         if (MENU_STATES.has(this.state)) this.updateMenu(dt, realDt);
         break;
     }
-    if (this.state !== 'paused') this.effects.update(dt, this.time);
+    if (this.state !== 'paused') {
+      this.effects.update(dt, this.time);
+      this.updateLightning(realDt);
+    }
     this.ui.update(realDt);
     this.input.endFrame();
   }
@@ -1107,6 +1232,7 @@ export class Game {
     this.followMoon(MENU_STATES.has(this.state) && this.state !== 'wardrobe' ? this.level.start.pos : this.player.pos);
     this.camera.getWorldDirection(this.lightFocus).multiplyScalar(6).add(this.camera.position);
     this.lightPool.update(this.lightFocus, dt);
+    this.weather.update(this.time, this.camera.position);
     if (this.bloom.enabled) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
   }
@@ -1298,7 +1424,18 @@ export class Game {
     const hint = this.level.hintAt(p.pos);
     if (hint && this.settings.hints) this.ui.showHint(hint, 9);
 
-    if (p.pos.y < this.level.killY || this.world.overlapCylinder(p.pos.x, p.pos.y + 0.1, p.pos.z, RADIUS * 0.8, p.height - 0.2, KILL)) {
+    const boss = this.level.boss;
+    if (boss?.dark !== undefined) {
+      this.ui.setDanger(Math.min(1, boss.dark) * 0.9);
+      this.renderer.toneMappingExposure = this.envDef.exposure * (1 - 0.5 * Math.min(1, boss.gloom ?? boss.dark));
+      if (boss.dark >= 1 && !boss.defeated) {
+        this.stats.time += dt;
+        this.ui.toast('A escuridão engoliu você', 1.4);
+        this.die();
+        return;
+      }
+    }
+    if (p.pos.y < this.level.killY || this.world.overlapCylinder(p.pos.x, p.pos.y + 0.1, p.pos.z, RADIUS * 0.8, p.height - 0.2, KILL) || boss?.kills?.(p)) {
       this.stats.time += dt;
       this.die();
       return;
@@ -1324,6 +1461,7 @@ export class Game {
     }
 
     this.updateFlow(dt);
+    this.updateWhispers();
     const speedK = this.cam.update(dt, p);
     this.ui.drawSpeedLines(speedK, dt);
     this.audio.setSpeed(speedK);
@@ -1331,6 +1469,7 @@ export class Game {
     this.stats.topSpeed = Math.max(this.stats.topSpeed, p.state === 'dash' ? 34 : p.worldSpeed);
     this.recorder.update(dt, p);
     this.ghost.update(this.stats.time, dt, this.settings.ghost && !this.stealth);
+    this.lira.update(dt, p);
     this.updateHUD();
   }
 
@@ -1409,6 +1548,7 @@ export class Game {
     this.level.update(dt, this.time);
     const t = this.time;
     const s = this.level.start.pos;
+    this.player.sitting = this.state === 'title';
     if (this.state === 'wardrobe') {
       // close no andarilho, deslocado para a direita da tela
       const pp = this.player.pos;
@@ -1420,6 +1560,11 @@ export class Game {
       this.tmp2.set(pp.x + vz * 1.1, pp.y + 1.05, pp.z - vx * 1.1);
       this.cam.cinematic(this.tmp, this.tmp2, dt, 3);
       this.demoPose(dt);
+    } else if (this.state === 'title') {
+      // o andarilho sentado de costas, olhando o horizonte (câmera respirando)
+      this.tmp.set(s.x - 2.2 + Math.sin(t * 0.11) * 0.4, s.y + 1.7 + Math.sin(t * 0.17) * 0.15, s.z + 4.4);
+      this.tmp2.set(s.x - 5.5, s.y + 2.6, s.z - 22);
+      this.cam.cinematic(this.tmp, this.tmp2, dt, 1.2);
     } else {
       this.tmp.set(s.x + Math.sin(t * 0.08) * 10, s.y + 7 + Math.sin(t * 0.13) * 1.2, s.z + 12 + Math.cos(t * 0.08) * 3);
       this.tmp2.set(s.x, s.y + 1.5, s.z - 25);

@@ -3,7 +3,7 @@
 // pausa, conclusão, opções, guarda-roupa (skins), memórias e epílogo.
 // Navegável por mouse, teclado (setas + Enter) e controle.
 import './style.css';
-import { CHAPTERS, LORE, PROLOGUE, EPILOGUE } from './lore.js';
+import { CHAPTERS, LORE, PROLOGUE, EPILOGUE, EPILOGUE_SECRET, VOICES, WHISPERS } from './lore.js';
 import { SKINS, skinUnlocked } from './skins.js';
 import { REBINDABLE, keyName } from './input.js';
 
@@ -98,6 +98,7 @@ export class UI {
         <div id="prompt"></div>
         <div id="hint"></div>
         <div id="toast"></div>
+        <div id="whisper"><div class="w-who"></div><div class="w-text"></div></div>
         <div id="memory-pop"><div class="mp-label">Fragmento de memória</div><div class="mp-text"></div></div>
         <div id="dot"></div>
         <div id="restart-tip"><kbd>R</kbd> reinicia</div>
@@ -263,6 +264,8 @@ export class UI {
     this.levelLabel = this.$('level-label');
     this.speedEl = this.$('speed-value');
     this.flowEl = this.$('flow');
+    this.whisperEl = this.$('whisper');
+    this.whisperTimer = 0;
     this.flowN = this.flowEl.querySelector('.flow-n');
     this.flowMove = this.flowEl.querySelector('.flow-move');
     this.flowBar = this.flowEl.querySelector('.flow-bar i');
@@ -469,10 +472,11 @@ export class UI {
   }
 
   // Runas acesas no Colosso (null esconde a barra).
-  setBoss(lit, total) {
+  setBoss(lit, total, name) {
     const el = this.$('boss');
     el.classList.toggle('hidden', lit === null);
     if (lit === null) return;
+    if (name) el.querySelector('.boss-name').textContent = name;
     this.$('boss-runes').innerHTML = Array.from({ length: total }, (_, i) => `<i class="${i < lit ? 'on' : ''}">◆</i>`).join('');
   }
 
@@ -524,6 +528,18 @@ export class UI {
   hideHint() {
     this.hintEl.classList.remove('show');
     this.hintTimer = 0;
+  }
+
+  // Fala da história: quem fala (nome e cor) e o texto, no alto da tela.
+  whisper(voice, text) {
+    const el = this.whisperEl;
+    el.querySelector('.w-who').textContent = voice.name;
+    el.querySelector('.w-text').textContent = `“${text}”`;
+    el.style.setProperty('--voice', voice.color);
+    el.classList.remove('show');
+    void el.offsetWidth;
+    el.classList.add('show');
+    this.whisperTimer = 4.2 + text.length * 0.035;
   }
 
   toast(text, duration = 2.6) {
@@ -599,7 +615,8 @@ export class UI {
       const mi = medalFor(best, def.medals);
       if (best !== null) done++;
       if (mi === 0) gold++;
-      const unlocked = i === 0 || progress.best[levels[i - 1].id] !== undefined || progress.unlockAll
+      // fase já concluída continua aberta (os chefes entraram no meio dos capítulos)
+      const unlocked = i === 0 || best !== null || progress.best[levels[i - 1].id] !== undefined || progress.unlockAll
         || (def.unlockAfter && progress.best[def.unlockAfter] !== undefined);
       const feats = progress.feats?.[def.id] ?? {};
       const frag = progress.fragments?.[def.id];
@@ -837,15 +854,28 @@ export class UI {
         p.className = 'mem' + (got ? ' on' : '');
         p.innerHTML = got ? `<b>◆</b> “${LORE[def.id]?.memory ?? ''}”` : `<b>◇</b> <i>fragmento perdido em ${def.name}</i>`;
         sec.appendChild(p);
+        // vozes já ouvidas nesta fase (o diário)
+        const heard = progress.heard?.[def.id] ?? 0;
+        (WHISPERS[def.id] ?? []).forEach(([, who, text], i) => {
+          if (!(heard & (1 << i))) return;
+          const v = VOICES[who];
+          const q = document.createElement('p');
+          q.className = 'mem-voice';
+          q.innerHTML = `<span style="color:${v.color}">${v.name}</span> ${text}`;
+          sec.appendChild(q);
+        });
       }
       list.appendChild(sec);
     });
     this.$('memories-summary').textContent = `${n}/${levels.length} fragmentos recordados`;
   }
 
-  showEpilogue() {
+  // secret: com todos os fragmentos, o reencontro com Lira (sozinho, no fim
+  // do jogo; ou depois do epílogo, no Colosso)
+  showEpilogue(secret = false, only = false) {
     const el = this.$('epilogue-text');
-    el.innerHTML = EPILOGUE.map((t, i) => `<p style="animation-delay:${0.4 + i * 1.6}s">${t}</p>`).join('');
+    const lines = only ? EPILOGUE_SECRET : secret ? [...EPILOGUE, ...EPILOGUE_SECRET] : EPILOGUE;
+    el.innerHTML = lines.map((t, i) => `<p class="${EPILOGUE_SECRET.includes(t) ? 'secret' : ''}" style="animation-delay:${0.4 + i * 1.6}s">${t}</p>`).join('');
     this.showScreen('epilogue');
   }
 
@@ -893,6 +923,10 @@ export class UI {
     if (this.toastTimer > 0) {
       this.toastTimer -= dt;
       if (this.toastTimer <= 0) this.toastEl.classList.remove('show');
+    }
+    if (this.whisperTimer > 0) {
+      this.whisperTimer -= dt;
+      if (this.whisperTimer <= 0) this.whisperEl.classList.remove('show');
     }
     if (this.splashTimer > 0) {
       this.splashTimer -= dt;

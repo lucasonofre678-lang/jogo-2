@@ -128,6 +128,110 @@ export class AudioSystem {
     }
   }
 
+  // Ambiente de cada capítulo: sons esparsos e distantes sobre o vento
+  // (sinos, apito de trem, rajadas, sussurros, coração, cristais, carrilhão).
+  setAmbience(style) {
+    this.ambStyle = style;
+    this.ambBeat = 0;
+    if (!this.ambTimer) this.ambTimer = setInterval(() => this.ambienceTick(), 600);
+  }
+
+  ambienceTick() {
+    const s = this.ambStyle;
+    if (!s || !this.ctx || this.ctx.state !== 'running') return;
+    const r = Math.random();
+    const t = this.ctx.currentTime;
+    if (s === 'sinos' && r < 0.07) {
+      // sino de bronze longe: parciais inarmônicas e cauda longa
+      const f = [196, 220, 247, 165][Math.floor(Math.random() * 4)];
+      for (const [k, p] of [[1, 0.028], [2.76, 0.012], [5.4, 0.006]]) {
+        this.tone({ type: 'sine', freq: f * k, peak: p, attack: 0.005, decay: 4.5 / k, dest: this.echoIn });
+      }
+    } else if (s === 'trilhos' && r < 0.05) {
+      // apito do comboio e o ronco dos trilhos
+      this.tone({ type: 'triangle', freq: 523, peak: 0.012, attack: 0.35, decay: 1.6, dest: this.echoIn });
+      this.tone({ type: 'triangle', freq: 659, peak: 0.01, attack: 0.35, decay: 1.6, dest: this.echoIn });
+      this.burst({ type: 'lowpass', freq: 140, q: 0.6, peak: 0.06, attack: 0.6, decay: 2.2 });
+    } else if (s === 'vento' && r < 0.12) {
+      this.burst({ type: 'bandpass', freq: 260, sweepTo: 900 + Math.random() * 600, q: 0.6, peak: 0.07, attack: 0.7, decay: 1.8 });
+    } else if (s === 'sussurros' && r < 0.08) {
+      // vozes sem palavras: rajadas curtas de formantes
+      for (let i = 0; i < 6; i++) {
+        this.burst({ type: 'bandpass', freq: 600 + Math.random() * 2200, q: 9, peak: 0.022, attack: 0.02, decay: 0.12, at: t + i * 0.09, dest: this.echoIn });
+      }
+    } else if (s === 'coracao') {
+      // batimento grave, devagar
+      this.ambBeat = (this.ambBeat + 1) % 2;
+      if (this.ambBeat === 0) {
+        this.tone({ type: 'sine', freq: 62, to: 38, peak: 0.09, attack: 0.01, decay: 0.28, at: t });
+        this.tone({ type: 'sine', freq: 58, to: 36, peak: 0.06, attack: 0.01, decay: 0.3, at: t + 0.26 });
+      }
+    } else if (s === 'cristal' && r < 0.1) {
+      const f = [1568, 1760, 2093, 2349, 2637][Math.floor(Math.random() * 5)];
+      this.tone({ type: 'sine', freq: f, peak: 0.014, attack: 0.004, decay: 2.2, dest: this.echoIn });
+    } else if (s === 'carrilhao' && r < 0.1) {
+      // carrilhão de vento em ré pentatônica
+      const notes = [1175, 1319, 1480, 1760, 1976, 2349];
+      const n = 2 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < n; i++) {
+        const f = notes[Math.floor(Math.random() * notes.length)];
+        this.tone({ type: 'sine', freq: f, peak: 0.012, attack: 0.003, decay: 1.6, at: t + i * (0.12 + Math.random() * 0.15), dest: this.echoIn });
+      }
+    }
+  }
+
+  // ------------------------------------------------------------ chefes
+  // badalada do grande sino (o Sineiro)
+  bell() {
+    if (!this.ctx) return;
+    for (const [k, p] of [[1, 0.16], [2.0, 0.06], [2.76, 0.07], [5.4, 0.03]]) {
+      this.tone({ type: 'sine', freq: 98 * k, peak: p, attack: 0.004, decay: 3.2 / Math.sqrt(k) });
+      this.tone({ type: 'sine', freq: 98 * k * 1.003, peak: p * 0.5, attack: 0.004, decay: 2.6, dest: this.echoIn });
+    }
+    this.burst({ type: 'bandpass', freq: 1800, q: 1.5, peak: 0.08, decay: 0.15 });
+  }
+
+  // apito da Locomotiva
+  whistle() {
+    for (const f of [466, 554, 698]) this.tone({ type: 'sawtooth', freq: f, to: f * 0.97, peak: 0.025, attack: 0.08, decay: 1.1, dest: this.echoIn });
+    this.burst({ type: 'highpass', freq: 2500, q: 0.6, peak: 0.06, attack: 0.05, decay: 0.9 });
+  }
+
+  // o Vendaval puxa o ar e depois sopra
+  inhale() {
+    this.burst({ type: 'bandpass', freq: 1600, sweepTo: 300, q: 0.8, peak: 0.12, attack: 0.9, decay: 0.3 });
+  }
+
+  gust() {
+    this.burst({ type: 'lowpass', freq: 700, sweepTo: 2200, q: 0.5, peak: 0.28, attack: 0.08, decay: 1.6 });
+    this.burst({ type: 'bandpass', freq: 400, q: 0.7, peak: 0.12, attack: 0.1, decay: 1.4 });
+  }
+
+  // o Eclipse apaga um braseiro; ele acende de novo
+  extinguish() {
+    this.tone({ type: 'sine', freq: 330, to: 55, peak: 0.12, attack: 0.02, decay: 1.2 });
+    this.burst({ type: 'lowpass', freq: 1400, sweepTo: 120, q: 0.7, peak: 0.12, attack: 0.02, decay: 0.8 });
+  }
+
+  relight() {
+    this.burst({ type: 'bandpass', freq: 300, sweepTo: 2400, q: 0.8, peak: 0.1, attack: 0.05, decay: 0.5 });
+    this.tone({ type: 'triangle', freq: 523, to: 784, peak: 0.04, decay: 0.5, dest: this.echoIn });
+  }
+
+  // a Traça come um muro
+  chomp() {
+    this.burst({ type: 'bandpass', freq: 900, sweepTo: 200, q: 2, peak: 0.16, attack: 0.01, decay: 0.35 });
+    this.burst({ type: 'highpass', freq: 3000, q: 1, peak: 0.06, attack: 0.01, decay: 0.5 });
+  }
+
+  // trovão depois do relâmpago (delay em segundos: a luz chega antes)
+  thunder(delay = 0.5) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime + delay;
+    this.burst({ type: 'lowpass', freq: 260, sweepTo: 60, q: 0.7, peak: 0.22, attack: 0.04, decay: 2.6, at: t });
+    this.burst({ type: 'lowpass', freq: 120, q: 0.5, peak: 0.16, attack: 0.3, decay: 3.2, at: t + 0.35 });
+  }
+
   env(gainNode, t, attack, peak, decay) {
     const g = gainNode.gain;
     g.setValueAtTime(0.0001, t);
@@ -139,7 +243,7 @@ export class AudioSystem {
     if (!this.ctx) return;
     const ctx = this.ctx;
     const t = at ?? ctx.currentTime;
-    const src = this.noise();
+    const src = this.noise(attack + decay > 0.4); // o buffer tem 2 s: ruídos longos repetem
     const f = ctx.createBiquadFilter();
     f.type = type;
     f.frequency.setValueAtTime(freq, t);
@@ -167,9 +271,21 @@ export class AudioSystem {
     o.stop(t + attack + decay + 0.05);
   }
 
-  step(kind) {
+  // surface: pedra (padrão), runa (muro dourado), madeira (vagões), cristal (outro mundo)
+  step(kind, surface = 'stone') {
     const peak = kind === 'run' ? 0.09 : kind === 'sneak' ? 0.018 : 0.045;
-    this.burst({ type: 'bandpass', freq: 380 + Math.random() * 250, q: 1.4, peak, decay: 0.07 + Math.random() * 0.03 });
+    if (surface === 'wood') {
+      this.burst({ type: 'bandpass', freq: 220 + Math.random() * 90, q: 3, peak: peak * 1.2, decay: 0.11 });
+      this.tone({ type: 'triangle', freq: 140 + Math.random() * 30, to: 110, peak: peak * 0.5, decay: 0.08 });
+    } else if (surface === 'rune') {
+      this.burst({ type: 'bandpass', freq: 900 + Math.random() * 300, q: 2, peak: peak * 0.8, decay: 0.06 });
+      this.tone({ type: 'sine', freq: [1175, 1319, 1480, 1760][Math.floor(Math.random() * 4)], peak: peak * 0.18, decay: 0.25, dest: this.echoIn });
+    } else if (surface === 'crystal') {
+      this.burst({ type: 'highpass', freq: 2200, q: 1, peak: peak * 0.6, decay: 0.05 });
+      this.tone({ type: 'sine', freq: 2093 + Math.random() * 400, peak: peak * 0.22, decay: 0.3, dest: this.echoIn });
+    } else {
+      this.burst({ type: 'bandpass', freq: 380 + Math.random() * 250, q: 1.4, peak, decay: 0.07 + Math.random() * 0.03 });
+    }
   }
 
   jump() {

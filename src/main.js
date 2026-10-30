@@ -2,7 +2,7 @@
 // mundo é montado e troca erros fatais por uma mensagem legível.
 import { Game } from './game.js';
 
-export const VERSION = '1.1';
+export const VERSION = '1.3';
 
 const boot = document.getElementById('boot');
 const msg = document.getElementById('boot-msg');

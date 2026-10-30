@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { Character } from './character.js';
 import { PoolLight } from './lights.js';
+import { skinById } from './skins.js';
 
 const GHOST_KEY = 'veil.ghost.';
 const SAMPLE_DT = 0.05;
@@ -239,6 +240,74 @@ export class GhostRunner {
     }
     this.fig.show(c, dt, this.wasHidden);
     this.wasHidden = false;
+  }
+}
+
+// --------------------------------------------------------------- Lira
+// A irmã do andarilho corre à frente nas fases do capítulo VII, por uma rota
+// gravada; se ele fica para trás, ela para e espera (nunca no meio do ar).
+export class LiraGuide {
+  constructor(scene, world) {
+    const body = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(1.2, 0.85, 0.4), transparent: true, opacity: 0.5, depthWrite: false,
+      blending: THREE.AdditiveBlending, side: THREE.DoubleSide, forceSinglePass: true,
+    });
+    const accent = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 1.7, 0.6) });
+    const eye = new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 2.6, 1.4) });
+    this.light = new PoolLight(0xffd890, 0, 6, 2);
+    this.light.position.y = 1.2;
+    this.fig = new EchoFigure(scene, world, { body, accent, eye }, this.light);
+    this.fig.setSkin(skinById('lira'));
+    this.fig.model.root.scale.setScalar(0.8); // ela é menor que o irmão
+    this.cur = { x: 0, y: 0, z: 0, f: 0, code: 0, done: false };
+    this.route = null;
+    this.t = 0;
+    this.wasHidden = true;
+  }
+
+  load(route, dt) {
+    this.route = route ? { s: route, dt } : null;
+    this.reset();
+  }
+
+  reset() {
+    this.t = 0;
+    this.hide();
+  }
+
+  hide() {
+    this.fig.setVisible(false);
+    this.light.intensity = 0;
+    this.wasHidden = true;
+  }
+
+  // renasceu num ponto de controle: ela volta para perto dele
+  seek(z) {
+    if (!this.route) return;
+    const s = this.route.s;
+    for (let i = 0; i < s.length; i += STRIDE) {
+      if (s[i + 2] <= z) {
+        this.t = (i / STRIDE) * this.route.dt;
+        this.wasHidden = true;
+        return;
+      }
+    }
+  }
+
+  update(dt, player) {
+    if (!this.route) return;
+    const c = sampleTrack(this.route.s, this.route.dt, this.t, this.cur, STRIDE);
+    if (c.done) {
+      if (this.fig.visible) this.hide();
+      return;
+    }
+    // espera o irmão quando está mais de 9 m à frente (só com os pés no chão)
+    const ahead = player.pos.z - c.z;
+    const grounded = c.code === 0 || c.code === 8;
+    if (ahead < 9 || !grounded) this.t += dt;
+    this.fig.show(c, dt, this.wasHidden);
+    this.wasHidden = false;
+    this.light.intensity = 5 + Math.sin(this.t * 6) * 1.2;
   }
 }
 

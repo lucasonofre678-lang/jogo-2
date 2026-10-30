@@ -1472,6 +1472,11 @@ export class LevelBuilder {
         any = true;
       }
     }
+    const bw = this.boss?.windAt?.(p);
+    if (bw) {
+      this.windVec.add(bw);
+      any = true;
+    }
     return any ? this.windVec : null;
   }
 
@@ -1720,6 +1725,16 @@ export class LevelBuilder {
   // Luta: o Colosso esmaga com o punho (o círculo vermelho avisa) e varre a
   // arena com o braço (baixo: pule; alto: deslize). Acenda as runas para
   // feri-lo; com todas acesas ele cai e o portal se abre.
+  // Chefe com controlador próprio (ver levels/bosses.js). def: { name,
+  // runes: [[x, y, z]...], tick(dt, time), reset(), kills(player),
+  // windAt(p), dispose() }. As runas 'boss' contam os acertos e o portal só
+  // abre quando todas acendem; tick continua depois da derrota (animação).
+  bossFight(def) {
+    const boss = { ...def, runes: def.runes.map(([x, y, z]) => this.rune(x, y, z, ['boss'])), lit: 0, defeated: false, custom: true, t: 0 };
+    this.boss = boss;
+    return boss;
+  }
+
   colossusBoss({ runes, arena = [-16, -14, 16, 16], y = 0 }) {
     const col = this.colossusAt(0, y - 40, arena[1] - 36, 1.7);
     const M = this.M;
@@ -1779,6 +1794,17 @@ export class LevelBuilder {
   resetBoss() {
     const b = this.boss;
     if (!b) return;
+    if (b.custom) {
+      b.lit = 0;
+      b.defeated = false;
+      b.t = 0;
+      b.reset?.();
+      if (this.goal) {
+        this.goal.locked = true;
+        this.goal.group.visible = false;
+      }
+      return;
+    }
     b.state = 'wait';
     b.t = 0;
     b.step = 0;
@@ -1838,22 +1864,34 @@ export class LevelBuilder {
     if (lit > b.lit) {
       b.lit = lit;
       this.onBossEvent?.('hit', b.lit, b.runes.length);
-      b.col.g.rotation.x = -0.15;
-      b.col.damage = lit;
-      b.col.flinch = 1;
+      b.onHit?.(lit);
+      if (b.col) {
+        b.col.g.rotation.x = -0.15;
+        b.col.damage = lit;
+        b.col.flinch = 1;
+      }
       if (lit >= b.runes.length && !b.defeated) {
         b.defeated = true;
-        b.fistC.enabled = false;
-        b.armC.enabled = false;
-        b.arm.visible = false;
-        b.warn.material.opacity = 0;
-        b.warnFill.material.opacity = 0;
+        if (b.custom) {
+          b.onDefeat?.();
+        } else {
+          b.fistC.enabled = false;
+          b.armC.enabled = false;
+          b.arm.visible = false;
+          b.warn.material.opacity = 0;
+          b.warnFill.material.opacity = 0;
+        }
         if (this.goal) {
           this.goal.locked = false;
           this.goal.group.visible = true;
         }
         this.onBossEvent?.('defeat', b.lit, b.runes.length);
       }
+    }
+    if (b.custom) {
+      b.t += dt;
+      b.tick?.(dt, this.time);
+      return;
     }
     b.col.g.rotation.x *= Math.exp(-3 * dt);
     if (b.defeated) {
@@ -2484,6 +2522,7 @@ export class LevelBuilder {
   // descartados: o shader compilado de cada um fica no cache do three.js e a
   // próxima fase com o mesmo tipo de material não precisa recompilar.
   dispose() {
+    this.boss?.dispose?.();
     this.scene.remove(this.group);
     const shared = new Set(Object.values(this.M).filter((m) => m && m.isMaterial));
     const sharedTex = new Set([this.M.runeTex]);

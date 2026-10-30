@@ -833,6 +833,20 @@ export class Character {
       s.headY = Math.sin(t * 0.5) * 0.4 * w;
       s.spineX = mid * 0.5;
       kPose = 6;
+    } else if (P.sitting) {
+      const br = Math.sin(t * 1.3) * 0.03; // respiração
+      s.bodyY = -0.62;
+      s.legL = s.legR = -1.45;
+      s.kneeL = s.kneeR = 2.35;
+      s.legSpread = 0.12;
+      s.armL = s.armR = -0.75;
+      s.spreadL = s.spreadR = 0.12;
+      s.elbowL = s.elbowR = -1.25;
+      s.lean = 0.12 + br;
+      s.spineX = 0.18;
+      s.headX = -0.18 + Math.sin(t * 0.4) * 0.05;
+      s.headY = Math.sin(t * 0.23) * 0.25;
+      kPose = 6;
     } else if (P.celebrate) {
       s.armL = s.armR = -2.75;
       s.spreadL = s.spreadR = 0.45;

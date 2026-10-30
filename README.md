@@ -1,9 +1,9 @@
-# VEIL  ·  v1.1
+# VEIL  ·  v1.3
 
 ![VEIL](press/04-colosso.png)
 
 Parkour místico em terceira pessoa. Um andarilho encapuzado acorda nas ruínas
-da Abadia Submersa, sem memória, e atravessa 33 fases em 7 capítulos para
+da Abadia Submersa, sem memória, e atravessa 39 fases em 7 capítulos para
 costurar o Véu que ele mesmo rasgou.
 
 Feito com **Three.js + Vite**, sem modelos, texturas ou sons externos: toda a
@@ -51,17 +51,26 @@ Abade virou o Colosso, e o andarilho esqueceu tudo. Cada fase tem um
 **fragmento de memória** escondido (◆) que conta um pedaço dessa história
 (tela **Memórias**). O final tem um epílogo.
 
+A história também acontece enquanto você corre: cada capítulo abre com um
+interlúdio, e no meio das fases falam as **vozes** — Lira, o Abade, a
+Sombra, as almas do Comboio e os pensamentos do próprio andarilho. Cada
+capítulo tem seu clima (cinza, chuva com relâmpagos, brasas, pólen) e seus
+sons de fundo (sinos, apito do trem fantasma, sussurros, um coração).
+
 ## Capítulos e fases
 
 | Capítulo | Fases |
 | --- | --- |
-| I — O Despertar | Despertar · Saltos de Fé · Lâminas do Véu · Corredor do Véu · Desabamento |
-| II — A Ferrovia dos Mortos | Comboio Espectral · Travessia · Tempestade · Fuga |
-| III — Céu Partido | Engrenagens · Torre da Maré · Céu Partido · Fendas · Âncoras de Luz · Ventos Uivantes · **Ondas de Luz** (surf) |
-| IV — O Outro Lado | Respiração · O Outro Lado · A Sombra · Fundo do Mundo · **Labirinto de Runas** |
+| I — O Despertar | Despertar · Saltos de Fé · Lâminas do Véu · Corredor do Véu · Desabamento · chefe **O Sineiro** |
+| II — A Ferrovia dos Mortos | Comboio Espectral · Travessia · Tempestade · Fuga · chefe **A Locomotiva** |
+| III — Céu Partido | Engrenagens · Torre da Maré · Céu Partido · Fendas · Âncoras de Luz · Ventos Uivantes · **Ondas de Luz** (surf) · chefe **O Vendaval** |
+| IV — O Outro Lado | Respiração · O Outro Lado · A Sombra · Fundo do Mundo · **Labirinto de Runas** · chefe **O Reflexo** |
 | V — O Coração do Véu | Abadia Submersa (stealth) · Coração do Véu · **O Colosso** (luta final) |
-| VI — Além do Véu | **Crista Partida** (surf difícil) · **Tempestade de Âncoras** · **Prova do Tecelão** (todas as mecânicas) |
-| VII — Os Fios de Lira | **Muros de Lira** · **Fios de Luz** · **Zigue-Zague** · **O Tear do Céu** · **Pega-Pega** (com a Sombra) · **O Último Fio** |
+| VI — Além do Véu | **Crista Partida** (surf difícil) · **Tempestade de Âncoras** · **Prova do Tecelão** (todas as mecânicas) · chefe **O Eclipse** |
+| VII — Os Fios de Lira | **Muros de Lira** · **Fios de Luz** · **Zigue-Zague** · **O Tear do Céu** · **Pega-Pega** (com a Sombra) · **O Último Fio** · chefe **A Traça** |
+
+Cada capítulo termina num chefe com mecânica própria (ondas do sino, luta em
+cima do trem, vento, os dois mundos, luz e escuridão, muros que somem).
 
 O capítulo VII abre ao derrotar o Colosso: são os caminhos que Lira corria
 quando criança, com corrida na parede e Fios de Luz.
@@ -162,6 +171,8 @@ src/
     surf.js            surf
     trials.js          fases combinadas, provas do capítulo VI e o Colosso
     lira.js            capítulo VII: muros rúnicos e Fios de Luz
+    liraRoutes.js      as rotas da Lira (guia) no capítulo VII
+    bosses.js          os chefes dos capítulos I, II, III, IV, VI e VII
     abbey.js           a Abadia Submersa (stealth)
   effects.js           partículas, imagens residuais (instanciadas), anéis de eco
   settings.js          opções salvas
